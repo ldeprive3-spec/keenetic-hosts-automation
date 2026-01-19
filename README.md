@@ -631,3 +631,12 @@ Telegram: @your_telegram (опционально)
 ⭐ Если проект помог - поставьте звезду! ⭐
 
 Made with ❤️ for Keenetic community
+
+# Удалите всё
+CONFIRM=yes DELETE_LOGS=no curl -fsSL https://raw.githubusercontent.com/ldeprive3-spec/keenetic-hosts-automation/main/uninstall.sh | sh
+
+# Установите заново
+curl -fsSL https://raw.githubusercontent.com/ldeprive3-spec/keenetic-hosts-automation/main/setup-dnsmasq-custom.sh -o /tmp/setup-dns.sh
+sed -i 's/kill $PID 2>/kill $PID >\/dev\/null 2>/g' /tmp/setup-dns.sh
+sh /tmp/setup-dns.sh
+
