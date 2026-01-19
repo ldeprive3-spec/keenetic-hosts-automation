@@ -3,7 +3,7 @@
 # ================================================================
 # Keenetic DNS + DPI Bypass Uninstaller
 # GitHub: https://github.com/ldeprive3-spec/keenetic-hosts-automation
-# Version: 1.0
+# Version: 1.1 - Fixed stdin issue
 # ================================================================
 
 RED='\033[0;31m'
@@ -40,13 +40,42 @@ echo "  • IP алиас 192.168.1.2"
 echo ""
 echo -e "${YELLOW}Бэкапы будут сохранены в /opt/etc/dnsmasq.d/backups/${NC}"
 echo ""
-echo -e "${RED}Продолжить удаление? (yes/no)${NC}"
-read -r CONFIRM
 
-if [ "$CONFIRM" != "yes" ] && [ "$CONFIRM" != "YES" ]; then
-    echo ""
-    echo -e "${GREEN}Удаление отменено${NC}"
-    exit 0
+# Проверка переменной окружения CONFIRM
+if [ -n "$CONFIRM" ]; then
+    if [ "$CONFIRM" = "yes" ] || [ "$CONFIRM" = "YES" ]; then
+        echo -e "${GREEN}✓ Подтверждение получено через переменную CONFIRM${NC}"
+        echo ""
+    else
+        echo -e "${GREEN}Удаление отменено (CONFIRM != yes)${NC}"
+        exit 0
+    fi
+else
+    # Интерактивный режим
+    echo -e "${RED}Продолжить удаление? (yes/no)${NC}"
+    
+    # Проверяем доступен ли stdin
+    if [ -t 0 ]; then
+        read -r CONFIRM_INPUT
+        if [ "$CONFIRM_INPUT" != "yes" ] && [ "$CONFIRM_INPUT" != "YES" ]; then
+            echo ""
+            echo -e "${GREEN}Удаление отменено${NC}"
+            exit 0
+        fi
+    else
+        echo ""
+        echo -e "${YELLOW}⚠ Стандартный ввод недоступен (curl | sh)${NC}"
+        echo ""
+        echo -e "${BLUE}Для автоматического удаления используйте:${NC}"
+        echo "  CONFIRM=yes curl ... | sh"
+        echo ""
+        echo -e "${BLUE}Или скачайте и запустите локально:${NC}"
+        echo "  curl -fsSL URL -o /tmp/uninstall.sh"
+        echo "  sh /tmp/uninstall.sh"
+        echo ""
+        echo -e "${GREEN}Удаление отменено${NC}"
+        exit 0
+    fi
 fi
 
 echo ""
@@ -176,28 +205,48 @@ echo -e "${GREEN}✓ Cron задачи удалены${NC}"
 echo ""
 
 # ================================================================
-# Удаление логов (опционально)
+# Удаление логов
 # ================================================================
 echo -e "${YELLOW}► Удаление логов...${NC}"
-echo ""
-echo -e "${YELLOW}Удалить логи? (yes/no)${NC}"
-echo "  /opt/var/log/dnsmasq.log"
-echo "  /opt/var/log/hosts-updater.log"
-echo "  /opt/var/log/hosts-stats.txt"
-echo "  /opt/var/log/nfqws.log"
-echo "  /opt/var/log/sync-dns-dpi.log"
-echo ""
-read -r DELETE_LOGS
 
-if [ "$DELETE_LOGS" = "yes" ] || [ "$DELETE_LOGS" = "YES" ]; then
-    rm -f /opt/var/log/dnsmasq.log 2>/dev/null || true
-    rm -f /opt/var/log/hosts-updater.log 2>/dev/null || true
-    rm -f /opt/var/log/hosts-stats.txt 2>/dev/null || true
-    rm -f /opt/var/log/nfqws.log 2>/dev/null || true
-    rm -f /opt/var/log/sync-dns-dpi.log 2>/dev/null || true
-    echo -e "${GREEN}✓ Логи удалены${NC}"
+# Проверка переменной DELETE_LOGS
+if [ -n "$DELETE_LOGS" ]; then
+    if [ "$DELETE_LOGS" = "yes" ] || [ "$DELETE_LOGS" = "YES" ]; then
+        rm -f /opt/var/log/dnsmasq.log 2>/dev/null || true
+        rm -f /opt/var/log/hosts-updater.log 2>/dev/null || true
+        rm -f /opt/var/log/hosts-stats.txt 2>/dev/null || true
+        rm -f /opt/var/log/nfqws.log 2>/dev/null || true
+        rm -f /opt/var/log/sync-dns-dpi.log 2>/dev/null || true
+        echo -e "${GREEN}✓ Логи удалены${NC}"
+    else
+        echo -e "${BLUE}✓ Логи сохранены (DELETE_LOGS != yes)${NC}"
+    fi
 else
-    echo -e "${BLUE}✓ Логи сохранены${NC}"
+    # Интерактивный режим
+    if [ -t 0 ]; then
+        echo ""
+        echo -e "${YELLOW}Удалить логи? (yes/no)${NC}"
+        echo "  /opt/var/log/dnsmasq.log"
+        echo "  /opt/var/log/hosts-updater.log"
+        echo "  /opt/var/log/hosts-stats.txt"
+        echo "  /opt/var/log/nfqws.log"
+        echo "  /opt/var/log/sync-dns-dpi.log"
+        echo ""
+        read -r DELETE_LOGS_INPUT
+        
+        if [ "$DELETE_LOGS_INPUT" = "yes" ] || [ "$DELETE_LOGS_INPUT" = "YES" ]; then
+            rm -f /opt/var/log/dnsmasq.log 2>/dev/null || true
+            rm -f /opt/var/log/hosts-updater.log 2>/dev/null || true
+            rm -f /opt/var/log/hosts-stats.txt 2>/dev/null || true
+            rm -f /opt/var/log/nfqws.log 2>/dev/null || true
+            rm -f /opt/var/log/sync-dns-dpi.log 2>/dev/null || true
+            echo -e "${GREEN}✓ Логи удалены${NC}"
+        else
+            echo -e "${BLUE}✓ Логи сохранены${NC}"
+        fi
+    else
+        echo -e "${BLUE}✓ Логи сохранены (автоматический режим)${NC}"
+    fi
 fi
 
 echo ""
@@ -287,7 +336,7 @@ echo "  ✓ Init скрипты (S55, S56, S51)"
 echo "  ✓ Cron задачи"
 echo "  ✓ Скрипты обновления и синхронизации"
 
-if [ "$DELETE_LOGS" = "yes" ] || [ "$DELETE_LOGS" = "YES" ]; then
+if [ -n "$DELETE_LOGS" ] && { [ "$DELETE_LOGS" = "yes" ] || [ "$DELETE_LOGS" = "YES" ]; }; then
     echo "  ✓ Логи"
 else
     echo "  ✓ Логи (сохранены в /opt/var/log/)"
