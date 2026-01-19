@@ -2,7 +2,7 @@
 
 # ================================================================
 # dnsmasq Setup for Keenetic - Auto port detection
-# Version: 2.3 - Fixed error handling
+# Version: 2.4 - Support for dnsmasq-full
 # ================================================================
 
 RED='\033[0;31m'
@@ -112,25 +112,80 @@ echo -e "${YELLOW}► Установка зависимостей...${NC}"
 
 opkg update >/dev/null 2>&1 || true
 
-if ! opkg list-installed | grep -q "^dnsmasq "; then
-    echo "  Установка dnsmasq..."
-    opkg install dnsmasq >/dev/null 2>&1 || true
-    if opkg list-installed | grep -q "^dnsmasq "; then
-        echo -e "${GREEN}  ✓ dnsmasq${NC}"
-    else
-        echo -e "${RED}  ✗ Ошибка установки dnsmasq${NC}"
-        exit 1
-    fi
-else
+# Проверка dnsmasq или dnsmasq-full
+DNSMASQ_INSTALLED=0
+DNSMASQ_PACKAGE=""
+
+if opkg list-installed 2>/dev/null | grep -q "^dnsmasq-full "; then
+    echo -e "${GREEN}  ✓ dnsmasq-full (уже установлен)${NC}"
+    DNSMASQ_INSTALLED=1
+    DNSMASQ_PACKAGE="dnsmasq-full"
+elif opkg list-installed 2>/dev/null | grep -q "^dnsmasq "; then
     echo -e "${GREEN}  ✓ dnsmasq (уже установлен)${NC}"
+    DNSMASQ_INSTALLED=1
+    DNSMASQ_PACKAGE="dnsmasq"
 fi
 
-if ! opkg list-installed | grep -q "^bind-dig "; then
+if [ $DNSMASQ_INSTALLED -eq 0 ]; then
+    echo "  Установка dnsmasq..."
+    
+    # Попробуем установить обычный dnsmasq
+    INSTALL_OUTPUT=$(opkg install dnsmasq 2>&1)
+    INSTALL_RESULT=$?
+    
+    if [ $INSTALL_RESULT -eq 0 ]; then
+        echo -e "${GREEN}  ✓ dnsmasq${NC}"
+        DNSMASQ_PACKAGE="dnsmasq"
+        DNSMASQ_INSTALLED=1
+    else
+        # Проверка конфликта с dnsmasq-full
+        if echo "$INSTALL_OUTPUT" | grep -qi "dnsmasq-full"; then
+            if opkg list-installed 2>/dev/null | grep -q "^dnsmasq-full "; then
+                echo -e "${BLUE}  ℹ dnsmasq-full уже установлен (конфликт с dnsmasq)${NC}"
+                DNSMASQ_PACKAGE="dnsmasq-full"
+                DNSMASQ_INSTALLED=1
+            else
+                echo -e "${RED}  ✗ Ошибка установки dnsmasq${NC}"
+                echo ""
+                echo -e "${YELLOW}Вывод opkg:${NC}"
+                echo "$INSTALL_OUTPUT"
+                exit 1
+            fi
+        else
+            echo -e "${RED}  ✗ Ошибка установки dnsmasq${NC}"
+            echo ""
+            echo -e "${YELLOW}Вывод opkg:${NC}"
+            echo "$INSTALL_OUTPUT"
+            echo ""
+            echo -e "${BLUE}Диагностика:${NC}"
+            echo "  Свободно места: $(df -h /opt 2>/dev/null | tail -1 | awk '{print $4}')"
+            exit 1
+        fi
+    fi
+fi
+
+# Проверка что dnsmasq доступен
+if ! command -v dnsmasq >/dev/null 2>&1; then
+    echo -e "${RED}  ✗ Команда dnsmasq не найдена!${NC}"
+    echo ""
+    echo "Проверьте установку:"
+    echo "  which dnsmasq"
+    echo "  /opt/sbin/dnsmasq --version"
+    exit 1
+fi
+
+# Вывод версии
+DNSMASQ_VERSION=$(dnsmasq --version 2>&1 | head -1 | sed 's/Dnsmasq version //' || echo "unknown")
+echo -e "${BLUE}  ℹ Пакет: ${DNSMASQ_PACKAGE}${NC}"
+echo -e "${BLUE}  ℹ Версия: ${DNSMASQ_VERSION}${NC}"
+
+# Установка bind-dig (опциональный)
+if ! opkg list-installed 2>/dev/null | grep -q "^bind-dig "; then
     opkg install bind-dig >/dev/null 2>&1 || true
-    if opkg list-installed | grep -q "^bind-dig "; then
+    if opkg list-installed 2>/dev/null | grep -q "^bind-dig "; then
         echo -e "${GREEN}  ✓ bind-dig${NC}"
     else
-        echo -e "${GREEN}  ✓ bind-dig (установка пропущена)${NC}"
+        echo -e "${YELLOW}  ⚠ bind-dig не установлен (необязательно)${NC}"
     fi
 else
     echo -e "${GREEN}  ✓ bind-dig (уже установлен)${NC}"
@@ -275,6 +330,7 @@ cat > /opt/etc/dnsmasq.conf << EOFCONF
 # ================================================================
 # dnsmasq Configuration for Keenetic
 # Auto-detected port: ${DNSMASQ_PORT}
+# Package: ${DNSMASQ_PACKAGE}
 # ================================================================
 
 # Basic settings
@@ -308,7 +364,6 @@ log-facility=/opt/var/log/dnsmasq.log
 
 # Performance
 dns-forward-max=150
-cache-size=1000
 
 # DNSSEC (optional, uncomment if needed)
 #dnssec
@@ -622,6 +677,7 @@ echo -e "${BLUE}╚════════════════════�
 echo ""
 
 echo -e "${GREEN}✅ DNS сервер: 192.168.1.2:${DNSMASQ_PORT}${NC}"
+echo -e "${GREEN}✅ Пакет: ${DNSMASQ_PACKAGE}${NC}"
 echo -e "${GREEN}✅ Автозапуск: настроен${NC}"
 echo -e "${GREEN}✅ Cron: настроен${NC}"
 
