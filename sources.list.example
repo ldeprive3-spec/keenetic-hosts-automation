@@ -1,0 +1,128 @@
+# ============================================================
+# HOSTS SOURCES LIST - Example Configuration
+# Format: URL|Description
+# Lines starting with # are ignored
+# ============================================================
+#
+# Этот файл является примером конфигурации источников hosts.
+# Скопируйте его в /opt/etc/hosts-automation/sources.list
+# и отредактируйте под свои нужды.
+#
+# ============================================================
+
+# ============================================================
+# PRIMARY SOURCES (GeoHide + Zapret)
+# ============================================================
+
+# GeoHide DNS - разблокировка российских и зарубежных сайтов
+# Включает: YouTube, Discord, Instagram, Twitter, Facebook и другие
+# Репозиторий: https://github.com/Internet-Helper/GeoHideDNS
+https://raw.githubusercontent.com/Internet-Helper/GeoHideDNS/refs/heads/main/hosts/hosts|dns.geohide.ru: hosts file
+
+# Zapret Discord/YouTube - специализированный список для обхода
+# Оптимизирован для Discord и YouTube с DPI bypass
+# Репозиторий: https://github.com/Flowseal/zapret-discord-youtube
+https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/.service/hosts|Zapret Discord/YouTube
+
+# ============================================================
+# AD BLOCKING (раскомментируйте для блокировки рекламы)
+# ============================================================
+
+# StevenBlack unified hosts - комплексная блокировка рекламы
+# Содержит: ~200,000 доменов (реклама, трекеры, вредоносы)
+# Репозиторий: https://github.com/StevenBlack/hosts
+#https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts|StevenBlack Unified
+
+# AdAway - блокировка мобильной рекламы
+# Содержит: ~30,000 доменов
+# Сайт: https://adaway.org
+#https://adaway.org/hosts.txt|AdAway
+
+# AdGuard DNS filter - фильтр от AdGuard
+# Содержит: ~80,000 правил
+# Репозиторий: https://github.com/AdguardTeam/AdGuardSDNSFilter
+#https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt|AdGuard DNS
+
+# Dan Pollock's hosts - классический список
+# Содержит: ~13,000 доменов
+# Сайт: https://someonewhocares.org
+#https://someonewhocares.org/hosts/zero/hosts|Dan Pollock
+
+# Peter Lowe's Ad Server List
+# Содержит: ~3,000 рекламных серверов
+# Сайт: https://pgl.yoyo.org
+#https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext|Peter Lowe
+
+# ============================================================
+# MALWARE & SECURITY
+# ============================================================
+
+# Malware Domain List
+#https://www.malwaredomainlist.com/hostslist/hosts.txt|Malware Domain List
+
+# URLhaus - malicious URLs
+#https://urlhaus.abuse.ch/downloads/hostfile/|URLhaus Malware
+
+# ============================================================
+# REGIONAL SOURCES
+# ============================================================
+
+# Russia - alternative unblock lists
+#https://raw.githubusercontent.com/dartraiden/no-russia-hosts/master/hosts.txt|No Russia Hosts
+
+# China - Great Firewall bypass
+#https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt|GFW List
+
+# ============================================================
+# PRIVACY & TRACKING
+# ============================================================
+
+# EasyPrivacy - tracking protection
+#https://v.firebog.net/hosts/Easyprivacy.txt|EasyPrivacy
+
+# WindowsSpyBlocker - telemetry blocking
+#https://raw.githubusercontent.com/crazy-max/WindowsSpyBlocker/master/data/hosts/spy.txt|Windows Spy Blocker
+
+# ============================================================
+# CUSTOM SOURCES
+# ============================================================
+
+# Добавьте свои источники ниже в формате:
+# URL|Описание
+
+# Примеры:
+
+# Ваш локальный файл (если доступен через HTTP)
+#http://192.168.1.100/my-blocklist.txt|Мой локальный список
+
+# Корпоративный список блокировок
+#https://company.com/internal/blocklist.txt|Корпоративный список
+
+# GitHub репозиторий с hosts
+#https://raw.githubusercontent.com/yourusername/your-repo/main/hosts.txt|Мой GitHub список
+
+# Pastebin или Gist
+#https://pastebin.com/raw/xxxxxxxx|Мой Pastebin список
+#https://gist.githubusercontent.com/username/gist-id/raw/hosts.txt|Мой Gist список
+
+# ============================================================
+# NOTES
+# ============================================================
+#
+# Формат каждой строки:
+#   URL|Описание
+#
+# URL - полный адрес hosts файла (http:// или https://)
+# Описание - краткое описание источника (отображается в логах)
+#
+# Комментарии:
+#   Строки начинающиеся с # игнорируются
+#   Пустые строки игнорируются
+#
+# Поддерживаемые форматы hosts файлов:
+#   - 0.0.0.0 domain.com
+#   - 127.0.0.1 domain.com
+#   - domain.com (без IP, будет добавлен 0.0.0.0)
+#   - IP domain.com (любой IP)
+#
+# ============================================================
