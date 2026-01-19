@@ -2,7 +2,7 @@
 
 # ================================================================
 # dnsmasq Setup for Keenetic - Auto port detection
-# Version: 2.4 - Support for dnsmasq-full
+# Version: 2.5 - Fixed kill command output redirection
 # ================================================================
 
 RED='\033[0;31m'
@@ -203,7 +203,7 @@ if [ -f /opt/etc/init.d/S56dnsmasq ]; then
     /opt/etc/init.d/S56dnsmasq stop >/dev/null 2>&1 || true
 fi
 
-# Убиваем все dnsmasq процессы (перенаправляем ВЕСЬ вывод)
+# Убиваем все dnsmasq процессы
 DNSMASQ_PIDS=$(ps 2>/dev/null | grep "[d]nsmasq" | awk '{print $1}' 2>/dev/null || true)
 if [ -n "$DNSMASQ_PIDS" ]; then
     for PID in $DNSMASQ_PIDS; do
@@ -221,7 +221,7 @@ if [ -n "$DNSMASQ_PIDS" ]; then
     fi
 fi
 
-echo -e "${GREEN}✓ Процессы остановлены${NC}"
+echo -e "${GREEN}✓ Процессы dnsmasq остановлены${NC}"
 echo ""
 
 # ================================================================
@@ -415,10 +415,10 @@ pre_cmd() {
 
 start_cmd() {
     # Убедимся что старые процессы dnsmasq убиты
-    DNSMASQ_PIDS=$(ps | grep "[d]nsmasq" | awk '{print $1}' 2>/dev/null || true)
+    DNSMASQ_PIDS=$(ps 2>/dev/null | grep "[d]nsmasq" | awk '{print $1}' 2>/dev/null || true)
     if [ -n "$DNSMASQ_PIDS" ]; then
         for PID in $DNSMASQ_PIDS; do
-            kill $PID 2>/dev/null || true
+            kill $PID >/dev/null 2>&1 || true
         done
         sleep 1
     fi
@@ -441,18 +441,18 @@ start_cmd() {
 }
 
 stop_cmd() {
-    DNSMASQ_PIDS=$(ps | grep "[d]nsmasq" | awk '{print $1}' 2>/dev/null || true)
+    DNSMASQ_PIDS=$(ps 2>/dev/null | grep "[d]nsmasq" | awk '{print $1}' 2>/dev/null || true)
     if [ -n "$DNSMASQ_PIDS" ]; then
         for PID in $DNSMASQ_PIDS; do
-            kill $PID 2>/dev/null || true
+            kill $PID >/dev/null 2>&1 || true
         done
         sleep 1
         
         # Принудительное убийство
-        DNSMASQ_PIDS=$(ps | grep "[d]nsmasq" | awk '{print $1}' 2>/dev/null || true)
+        DNSMASQ_PIDS=$(ps 2>/dev/null | grep "[d]nsmasq" | awk '{print $1}' 2>/dev/null || true)
         if [ -n "$DNSMASQ_PIDS" ]; then
             for PID in $DNSMASQ_PIDS; do
-                kill -9 $PID 2>/dev/null || true
+                kill -9 $PID >/dev/null 2>&1 || true
             done
         fi
     fi
