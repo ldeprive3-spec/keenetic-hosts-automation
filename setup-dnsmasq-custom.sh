@@ -1,8 +1,8 @@
 #!/bin/sh
 
 # ================================================================
-# dnsmasq Setup for Keenetic - Fixed for ndnproxy compatibility
-# Version: 2.1
+# dnsmasq Setup for Keenetic - Auto port detection
+# Version: 2.2
 # ================================================================
 
 RED='\033[0;31m'
@@ -17,46 +17,92 @@ echo -e "${BLUE}╚════════════════════�
 echo ""
 
 # ================================================================
-# Проверка конфликтов портов
+# Функции
+# ================================================================
+
+# Проверка занят ли порт
+check_port() {
+    PORT=$1
+    if netstat -ln 2>/dev/null | grep -q ":${PORT} "; then
+        return 1  # Занят
+    else
+        return 0  # Свободен
+    fi
+}
+
+# Получить процесс на порту
+get_port_process() {
+    PORT=$1
+    netstat -lnp 2>/dev/null | grep ":${PORT} " | awk '{print $NF}' | cut -d/ -f2 | head -1
+}
+
+# ================================================================
+# Проверка конфликтов портов (РАСШИРЕННАЯ)
 # ================================================================
 echo -e "${YELLOW}► Проверка конфликтов портов...${NC}"
 
-# Проверка порта 53
-PORT_53_USED=$(netstat -ln | grep ":53 " | grep -v "127.0.0.1" | wc -l)
+DNSMASQ_PORT=""
+PREFERRED_PORTS="53 5353 5300 5354 5400 54"
 
-if [ "$PORT_53_USED" -gt 0 ]; then
-    echo -e "${YELLOW}  ⚠ Порт 53 занят (вероятно ndnproxy)${NC}"
-    
-    # Проверяем это ndnproxy
-    if ps | grep -q "ndnproxy"; then
-        echo -e "${BLUE}  ℹ Обнаружен ndnproxy (встроенный DNS Keenetic)${NC}"
-        echo -e "${BLUE}  ℹ dnsmasq будет использовать порт 5353${NC}"
-        DNSMASQ_PORT=5353
+for PORT in $PREFERRED_PORTS; do
+    if check_port $PORT; then
+        DNSMASQ_PORT=$PORT
+        if [ "$PORT" = "53" ]; then
+            echo -e "${GREEN}  ✓ Порт 53 свободен${NC}"
+        else
+            echo -e "${GREEN}  ✓ Найден свободный порт: $DNSMASQ_PORT${NC}"
+        fi
+        break
     else
-        echo -e "${YELLOW}  ⚠ Порт 53 занят неизвестным процессом:${NC}"
-        netstat -lnp | grep ":53 "
-        echo ""
-        echo -e "${YELLOW}  Продолжить с портом 5353? (Ctrl+C для отмены)${NC}"
-        sleep 5
-        DNSMASQ_PORT=5353
+        PROCESS=$(get_port_process $PORT)
+        if [ "$PORT" = "53" ]; then
+            echo -e "${YELLOW}  ⚠ Порт 53 занят: ${PROCESS:-unknown}${NC}"
+            
+            # Детектим известные сервисы
+            if echo "$PROCESS" | grep -q "ndnproxy"; then
+                echo -e "${BLUE}     → ndnproxy (встроенный DNS Keenetic)${NC}"
+            elif echo "$PROCESS" | grep -qi "dnsmasq"; then
+                echo -e "${BLUE}     → dnsmasq (возможно старый процесс)${NC}"
+            elif echo "$PROCESS" | grep -qi "adguard"; then
+                echo -e "${YELLOW}     → AdGuard Home (конфликт!)${NC}"
+            fi
+        elif [ "$PORT" = "5353" ]; then
+            echo -e "${YELLOW}  ⚠ Порт 5353 занят: ${PROCESS:-unknown}${NC}"
+            
+            if echo "$PROCESS" | grep -q "avahi"; then
+                echo -e "${BLUE}     → avahi-daemon (mDNS/Bonjour)${NC}"
+            fi
+        else
+            echo -e "${YELLOW}  ⚠ Порт $PORT занят: ${PROCESS:-unknown}${NC}"
+        fi
     fi
-else
-    echo -e "${GREEN}  ✓ Порт 53 свободен${NC}"
-    DNSMASQ_PORT=53
+done
+
+if [ -z "$DNSMASQ_PORT" ]; then
+    echo ""
+    echo -e "${RED}  ✗ Не найдено свободных портов!${NC}"
+    echo ""
+    echo -e "${YELLOW}  Попробованы порты: $PREFERRED_PORTS${NC}"
+    echo ""
+    echo -e "${YELLOW}  Варианты решения:${NC}"
+    echo "  1. Остановите avahi-daemon:"
+    echo "     /opt/etc/init.d/S42avahi stop"
+    echo "     chmod -x /opt/etc/init.d/S42avahi"
+    echo ""
+    echo "  2. Остановите старый dnsmasq:"
+    echo "     killall dnsmasq"
+    echo ""
+    echo "  3. Если установлен AdGuard Home - удалите его"
+    echo ""
+    exit 1
 fi
 
-# Проверка порта 5353 если он выбран
-if [ "$DNSMASQ_PORT" = "5353" ]; then
-    if netstat -ln | grep -q ":5353 "; then
-        echo -e "${RED}  ✗ Порт 5353 тоже занят!${NC}"
-        netstat -lnp | grep ":5353"
-        echo ""
-        echo -e "${RED}  Установка невозможна. Освободите порт 53 или 5353.${NC}"
-        exit 1
-    fi
+echo -e "${GREEN}  ✓ Будет использован порт: ${DNSMASQ_PORT}${NC}"
+
+if [ "$DNSMASQ_PORT" != "53" ]; then
+    echo -e "${BLUE}  ℹ dnsmasq будет работать совместно с существующими DNS${NC}"
 fi
 
-echo -e "${GREEN}  ✓ Будет использован порт: $DNSMASQ_PORT${NC}"
 echo ""
 
 # ================================================================
@@ -89,7 +135,7 @@ fi
 echo ""
 
 # ================================================================
-# Остановка существующих процессов
+# Остановка существующих процессов dnsmasq
 # ================================================================
 echo -e "${YELLOW}► Остановка существующих процессов dnsmasq...${NC}"
 
@@ -97,10 +143,16 @@ if [ -f /opt/etc/init.d/S56dnsmasq ]; then
     /opt/etc/init.d/S56dnsmasq stop >/dev/null 2>&1
 fi
 
-killall dnsmasq 2>/dev/null
-sleep 1
+# Убиваем все dnsmasq процессы (но не ndnproxy и avahi!)
+DNSMASQ_PIDS=$(ps | grep dnsmasq | grep -v grep | awk '{print $1}')
+if [ -n "$DNSMASQ_PIDS" ]; then
+    for PID in $DNSMASQ_PIDS; do
+        kill $PID 2>/dev/null
+    done
+    sleep 1
+fi
 
-echo -e "${GREEN}✓ Процессы остановлены${NC}"
+echo -e "${GREEN}✓ Процессы dnsmasq остановлены${NC}"
 echo ""
 
 # ================================================================
@@ -207,7 +259,7 @@ echo -e "${YELLOW}► Создание конфигурации dnsmasq...${NC}"
 cat > /opt/etc/dnsmasq.conf << EOFCONF
 # ================================================================
 # dnsmasq Configuration for Keenetic
-# Port: ${DNSMASQ_PORT} (auto-detected to avoid conflicts)
+# Auto-detected port: ${DNSMASQ_PORT}
 # ================================================================
 
 # Basic settings
@@ -287,9 +339,14 @@ pre_cmd() {
 }
 
 start_cmd() {
-    # Убедимся что старые процессы убиты
-    killall dnsmasq 2>/dev/null
-    sleep 1
+    # Убедимся что старые процессы dnsmasq убиты
+    DNSMASQ_PIDS=$(ps | grep dnsmasq | grep -v grep | awk '{print $1}')
+    if [ -n "$DNSMASQ_PIDS" ]; then
+        for PID in $DNSMASQ_PIDS; do
+            kill $PID 2>/dev/null
+        done
+        sleep 1
+    fi
     
     # Запуск
     dnsmasq --conf-file=/opt/etc/dnsmasq.conf
@@ -308,8 +365,13 @@ start_cmd() {
 }
 
 stop_cmd() {
-    killall dnsmasq 2>/dev/null
-    sleep 1
+    DNSMASQ_PIDS=$(ps | grep dnsmasq | grep -v grep | awk '{print $1}')
+    if [ -n "$DNSMASQ_PIDS" ]; then
+        for PID in $DNSMASQ_PIDS; do
+            kill $PID 2>/dev/null
+        done
+        sleep 1
+    fi
     return 0
 }
 
@@ -349,9 +411,6 @@ echo ""
 # ================================================================
 echo -e "${YELLOW}► Создание утилит мониторинга...${NC}"
 
-# Определяем порт для dashboard
-DASHBOARD_PORT=$(grep "^port=" /opt/etc/dnsmasq.conf | cut -d= -f2)
-
 cat > /opt/bin/dns-status << EOFDASH
 #!/bin/sh
 
@@ -376,11 +435,16 @@ echo "   Primary:   \${PRIMARY_IP:-N/A}"
 echo "   Secondary: \${SECONDARY_IP:-N/A}"
 echo ""
 
+# Определяем порт из конфига
+DNSMASQ_PORT=\$(grep "^port=" /opt/etc/dnsmasq.conf 2>/dev/null | cut -d= -f2)
+[ -z "\$DNSMASQ_PORT" ] && DNSMASQ_PORT="53"
+
 # dnsmasq status
 if pgrep dnsmasq >/dev/null; then
     PID=\$(pgrep dnsmasq)
     echo -e "\${BLUE}📊 Status:\${NC}"
     echo -e "   \${GREEN}✅ dnsmasq: RUNNING (PID: \${PID})\${NC}"
+    echo -e "   \${BLUE}   Port: \${DNSMASQ_PORT}\${NC}"
 else
     echo -e "\${BLUE}📊 Status:\${NC}"
     echo -e "   \${RED}❌ dnsmasq: STOPPED\${NC}"
@@ -389,12 +453,12 @@ echo ""
 
 # Listening ports
 echo -e "\${BLUE}🔌 Listening:\${NC}"
-netstat -ln | grep "192.168.1.2:${DASHBOARD_PORT}" | while read line; do
+netstat -ln | grep "192.168.1.2:\${DNSMASQ_PORT}" | while read line; do
     echo "   \$line"
 done
 
-if ! netstat -ln | grep -q "192.168.1.2:${DASHBOARD_PORT}"; then
-    echo "   (none - порт ${DASHBOARD_PORT} не слушается)"
+if ! netstat -ln | grep -q "192.168.1.2:\${DNSMASQ_PORT}"; then
+    echo "   (none - порт \${DNSMASQ_PORT} не слушается)"
 fi
 echo ""
 
@@ -411,11 +475,14 @@ echo ""
 if [ -f /opt/var/log/dnsmasq.log ]; then
     echo -e "\${BLUE}📈 Recent queries (last 5):\${NC}"
     tail -5 /opt/var/log/dnsmasq.log | grep "query" | awk '{print "   " \$6, "\t→", \$8}' 2>/dev/null
+    if [ \$? -ne 0 ]; then
+        echo "   (нет запросов)"
+    fi
     echo ""
 fi
 
 # DNS test
-TEST_RESULT=\$(dig @192.168.1.2 -p ${DASHBOARD_PORT} google.com +short 2>/dev/null | head -1)
+TEST_RESULT=\$(dig @192.168.1.2 -p \${DNSMASQ_PORT} google.com +short 2>/dev/null | head -1)
 if [ -n "\$TEST_RESULT" ]; then
     echo -e "\${BLUE}🧪 Test:\${NC} google.com → \${GREEN}\${TEST_RESULT}\${NC}"
 else
@@ -426,12 +493,14 @@ echo ""
 echo "Commands:"
 echo "  /opt/etc/init.d/S56dnsmasq restart - перезапуск"
 echo "  tail -f /opt/var/log/dnsmasq.log   - мониторинг"
+echo "  /opt/etc/update-hosts-auto.sh      - обновить hosts"
 
-if [ "${DASHBOARD_PORT}" != "53" ]; then
+if [ "\${DNSMASQ_PORT}" != "53" ]; then
     echo ""
-    echo -e "\${YELLOW}ℹ INFO: dnsmasq работает на порту ${DASHBOARD_PORT}\${NC}"
-    echo -e "\${YELLOW}  Причина: порт 53 занят (вероятно ndnproxy)\${NC}"
-    echo -e "\${YELLOW}  Настройте Keenetic использовать 192.168.1.2 как DNS\${NC}"
+    echo -e "\${YELLOW}ℹ INFO:\${NC}"
+    echo -e "  dnsmasq работает на порту \${DNSMASQ_PORT}"
+    echo -e "  Порт 53 занят другим сервисом (ndnproxy/avahi)"
+    echo -e "  Настройте Keenetic использовать 192.168.1.2 как DNS"
 fi
 EOFDASH
 
@@ -450,9 +519,12 @@ echo -e "${YELLOW}► Запуск dnsmasq...${NC}"
 sleep 2
 
 if pgrep dnsmasq >/dev/null; then
-    echo -e "${GREEN}✓ dnsmasq запущен${NC}"
+    echo -e "${GREEN}✓ dnsmasq запущен (PID: $(pgrep dnsmasq))${NC}"
 else
-    echo -e "${YELLOW}⚠ dnsmasq не запущен, проверьте логи${NC}"
+    echo -e "${YELLOW}⚠ dnsmasq не запущен${NC}"
+    echo ""
+    echo "Попробуйте запустить вручную для диагностики:"
+    echo "  dnsmasq --conf-file=/opt/etc/dnsmasq.conf --no-daemon"
 fi
 
 echo ""
@@ -490,7 +562,7 @@ echo -e "${YELLOW}► Финальная проверка...${NC}"
 if netstat -ln | grep -q "192.168.1.2:${DNSMASQ_PORT}"; then
     echo -e "${GREEN}✓ Порт ${DNSMASQ_PORT} слушается${NC}"
 else
-    echo -e "${YELLOW}✗ Порт не слушается${NC}"
+    echo -e "${YELLOW}⚠ Порт ${DNSMASQ_PORT} не слушается${NC}"
 fi
 
 # Тест DNS
@@ -500,6 +572,8 @@ if [ -n "$DNS_TEST" ]; then
     echo -e "${GREEN}✓ DNS тест: google.com → ${DNS_TEST}${NC}"
 else
     echo -e "${YELLOW}⚠ DNS тест не прошел${NC}"
+    echo "  Попробуйте:"
+    echo "    dig @192.168.1.2 -p ${DNSMASQ_PORT} google.com"
 fi
 
 echo ""
@@ -519,7 +593,14 @@ echo -e "${GREEN}✅ Cron: настроен${NC}"
 if [ "$DNSMASQ_PORT" != "53" ]; then
     echo ""
     echo -e "${YELLOW}⚠ ВАЖНО: dnsmasq использует порт ${DNSMASQ_PORT}${NC}"
-    echo -e "${YELLOW}  Причина: порт 53 занят встроенным DNS (ndnproxy)${NC}"
+    
+    if check_port 53; then
+        : # 53 не занят
+    else
+        PORT_53_PROC=$(get_port_process 53)
+        echo -e "${YELLOW}  Причина: порт 53 занят ($PORT_53_PROC)${NC}"
+    fi
+    
     echo ""
     echo -e "${BLUE}📋 Настройка Keenetic:${NC}"
     echo "  1. Откройте: http://192.168.1.1"
@@ -527,7 +608,10 @@ if [ "$DNSMASQ_PORT" != "53" ]; then
     echo "  3. DNS 1: 192.168.1.2"
     echo "  4. DNS 2: 8.8.8.8 (резервный)"
     echo ""
-    echo -e "${BLUE}  ndnproxy (порт 53) → dnsmasq (порт ${DNSMASQ_PORT})${NC}"
+    
+    if [ "$PORT_53_PROC" = "ndnproxy" ]; then
+        echo -e "${BLUE}  ℹ ndnproxy (порт 53) → dnsmasq (порт ${DNSMASQ_PORT})${NC}"
+    fi
 fi
 
 echo ""
