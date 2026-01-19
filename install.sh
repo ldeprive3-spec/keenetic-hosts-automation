@@ -3,7 +3,7 @@
 # ================================================================
 # Keenetic DNS + DPI Bypass Automation
 # GitHub: https://github.com/ldeprive3-spec/keenetic-hosts-automation
-# Version: 2.0 (dnsmasq + nfqws support)
+# Version: 2.0
 # ================================================================
 
 RED='\033[0;31m'
@@ -45,46 +45,58 @@ fi
 echo -e "${GREEN}✓ Entware: установлен${NC}"
 
 # ================================================================
-# Выбор режима установки
+# Определение режима установки
 # ================================================================
+# Можно передать через переменную окружения или параметр
+# Например: MODE=1 curl ... | sh
+# Или: sh install.sh 1
+
+if [ -n "$1" ]; then
+    INSTALL_MODE="$1"
+elif [ -n "$MODE" ]; then
+    INSTALL_MODE="$MODE"
+else
+    # По умолчанию полная установка (режим 3)
+    INSTALL_MODE=3
+fi
+
 echo ""
-echo -e "${YELLOW}Выберите режим установки:${NC}"
-echo "  1) Только dnsmasq (DNS сервер + hosts)"
-echo "  2) Только nfqws (DPI bypass для YouTube/Discord)"
-echo "  3) Оба (РЕКОМЕНДУЕТСЯ - полная защита)"
-echo ""
-read -p "Ваш выбор [1-3]: " INSTALL_MODE
+echo -e "${YELLOW}Режим установки:${NC}"
 
 case "$INSTALL_MODE" in
     1)
         INSTALL_DNSMASQ=1
         INSTALL_NFQWS=0
-        echo -e "${GREEN}✓ Режим: только dnsmasq${NC}"
+        echo -e "${GREEN}✓ Режим 1: только dnsmasq (DNS сервер + hosts)${NC}"
         ;;
     2)
         INSTALL_DNSMASQ=0
         INSTALL_NFQWS=1
-        echo -e "${GREEN}✓ Режим: только nfqws${NC}"
+        echo -e "${GREEN}✓ Режим 2: только nfqws (DPI bypass)${NC}"
         ;;
-    3)
+    3|*)
         INSTALL_DNSMASQ=1
         INSTALL_NFQWS=1
-        echo -e "${GREEN}✓ Режим: dnsmasq + nfqws (полный)${NC}"
-        ;;
-    *)
-        echo -e "${RED}✗ Неверный выбор, используем режим 3${NC}"
-        INSTALL_DNSMASQ=1
-        INSTALL_NFQWS=1
+        echo -e "${GREEN}✓ Режим 3: dnsmasq + nfqws (ПОЛНАЯ ЗАЩИТА)${NC}"
         ;;
 esac
+
+echo ""
+echo -e "${BLUE}💡 Совет: для выбора режима используйте:${NC}"
+echo "   MODE=1 curl ... | sh  (только dnsmasq)"
+echo "   MODE=2 curl ... | sh  (только nfqws)"
+echo "   MODE=3 curl ... | sh  (оба, по умолчанию)"
+echo ""
+
+sleep 2
 
 # ================================================================
 # Установка curl/wget
 # ================================================================
-echo ""
 echo -e "${YELLOW}► Проверка зависимостей...${NC}"
 
 if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+    echo "  Установка curl..."
     opkg update >/dev/null 2>&1
     opkg install curl >/dev/null 2>&1
 fi
@@ -101,23 +113,37 @@ else
 fi
 
 # ================================================================
-# Проверка компонентов Keenetic для nfqws
+# Проверка компонентов для nfqws
 # ================================================================
 if [ "$INSTALL_NFQWS" = "1" ]; then
     echo ""
     echo -e "${YELLOW}► Проверка компонентов Keenetic для nfqws...${NC}"
-    echo ""
-    echo -e "${BLUE}ВНИМАНИЕ!${NC} Для работы nfqws требуются компоненты:"
-    echo "  1. Протокол IPv6 (Network functions → IPv6)"
-    echo "  2. Модули ядра Netfilter (OPKG → Kernel modules)"
-    echo ""
-    echo "Установите их через веб-интерфейс: http://192.168.1.1"
-    echo ""
-    read -p "Компоненты установлены? [y/N]: " COMPONENTS_OK
     
-    if [ "$COMPONENTS_OK" != "y" ] && [ "$COMPONENTS_OK" != "Y" ]; then
-        echo -e "${YELLOW}⚠ Установка nfqws будет пропущена${NC}"
+    # Проверка IPv6
+    if ! ip -6 addr show >/dev/null 2>&1; then
+        echo -e "${YELLOW}⚠ IPv6 не включен${NC}"
+        echo "  Включите: http://192.168.1.1 → Управление → Компоненты → Протокол IPv6"
+        echo ""
+        echo "  Продолжить без nfqws? (установим только dnsmasq)"
+        echo "  Нажмите Ctrl+C для отмены, или ждите 10 сек..."
+        sleep 10
         INSTALL_NFQWS=0
+    fi
+    
+    # Проверка netfilter модулей
+    if [ "$INSTALL_NFQWS" = "1" ] && ! lsmod 2>/dev/null | grep -q "nf_"; then
+        echo -e "${YELLOW}⚠ Netfilter модули не найдены${NC}"
+        echo "  Установите: http://192.168.1.1 → Управление → Компоненты"
+        echo "  → Модули ядра Netfilter"
+        echo ""
+        echo "  Продолжить без nfqws? (установим только dnsmasq)"
+        echo "  Нажмите Ctrl+C для отмены, или ждите 10 сек..."
+        sleep 10
+        INSTALL_NFQWS=0
+    fi
+    
+    if [ "$INSTALL_NFQWS" = "1" ]; then
+        echo -e "${GREEN}✓ Компоненты готовы для nfqws${NC}"
     fi
 fi
 
@@ -135,26 +161,39 @@ if [ "$INSTALL_DNSMASQ" = "1" ]; then
     echo -e "${YELLOW}► Загрузка setup-dnsmasq-custom.sh...${NC}"
     
     $DOWNLOAD_CMD "${REPO_URL}/setup-dnsmasq-custom.sh" > setup-dnsmasq-custom.sh 2>/dev/null
+    
     if [ $? -eq 0 ] && [ -s setup-dnsmasq-custom.sh ]; then
         chmod +x setup-dnsmasq-custom.sh
         echo -e "${GREEN}✓ Скрипт загружен${NC}"
         
         echo ""
         echo -e "${YELLOW}► Установка dnsmasq...${NC}"
+        echo ""
+        
         ./setup-dnsmasq-custom.sh
         
         if [ $? -eq 0 ]; then
-            echo -e "${GREEN}✓ dnsmasq установлен${NC}"
+            echo ""
+            echo -e "${GREEN}✓ dnsmasq успешно установлен${NC}"
+            DNSMASQ_OK=1
         else
+            echo ""
             echo -e "${RED}✗ Ошибка установки dnsmasq${NC}"
+            DNSMASQ_OK=0
         fi
     else
         echo -e "${RED}✗ Ошибка загрузки скрипта${NC}"
+        DNSMASQ_OK=0
     fi
     
     # Копирование update-hosts-auto.sh
-    $DOWNLOAD_CMD "${REPO_URL}/update-hosts-auto.sh" > /opt/etc/update-hosts-auto.sh 2>/dev/null
-    chmod +x /opt/etc/update-hosts-auto.sh
+    if [ "$DNSMASQ_OK" = "1" ]; then
+        echo ""
+        echo -e "${YELLOW}► Установка скрипта обновления...${NC}"
+        $DOWNLOAD_CMD "${REPO_URL}/update-hosts-auto.sh" > /opt/etc/update-hosts-auto.sh 2>/dev/null
+        chmod +x /opt/etc/update-hosts-auto.sh
+        echo -e "${GREEN}✓ Скрипт обновления установлен${NC}"
+    fi
 fi
 
 # ================================================================
@@ -165,52 +204,54 @@ if [ "$INSTALL_NFQWS" = "1" ]; then
     echo -e "${YELLOW}► Установка nfqws-keenetic...${NC}"
     
     # Установка зависимостей
+    echo "  Установка зависимостей..."
     opkg update >/dev/null 2>&1
     opkg install ca-certificates wget-ssl >/dev/null 2>&1
     opkg remove wget-nossl >/dev/null 2>&1
     
-    # Добавление репозитория nfqws
+    # Добавление репозитория
+    echo "  Добавление репозитория nfqws..."
     mkdir -p /opt/etc/opkg
     echo "src/gz nfqws-keenetic https://anonym-tsk.github.io/nfqws-keenetic/all" > /opt/etc/opkg/nfqws-keenetic.conf
     
-    # Установка nfqws
+    # Установка
+    echo "  Установка пакетов..."
     opkg update >/dev/null 2>&1
     opkg install nfqws-keenetic >/dev/null 2>&1
     
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✓ nfqws-keenetic установлен${NC}"
+        NFQWS_OK=1
         
-        # Опционально веб-интерфейс
+        # Опциональный веб-интерфейс
         echo ""
-        read -p "Установить веб-интерфейс nfqws? (http://192.168.1.1:90) [y/N]: " INSTALL_WEB
-        
-        if [ "$INSTALL_WEB" = "y" ] || [ "$INSTALL_WEB" = "Y" ]; then
-            opkg install nfqws-keenetic-web >/dev/null 2>&1
-            if [ $? -eq 0 ]; then
-                echo -e "${GREEN}✓ Веб-интерфейс установлен: http://192.168.1.1:90${NC}"
-            fi
+        echo -e "${YELLOW}  Установка веб-интерфейса nfqws...${NC}"
+        opkg install nfqws-keenetic-web >/dev/null 2>&1
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}✓ Веб-интерфейс: http://192.168.1.1:90${NC}"
+        else
+            echo -e "${YELLOW}⚠ Веб-интерфейс не установлен (необязательно)${NC}"
         fi
         
-        # Настройка интеграции с dnsmasq
-        if [ "$INSTALL_DNSMASQ" = "1" ]; then
+        # Интеграция с dnsmasq
+        if [ "$INSTALL_DNSMASQ" = "1" ] && [ "$DNSMASQ_OK" = "1" ]; then
             echo ""
-            echo -e "${YELLOW}► Интеграция dnsmasq ↔ nfqws...${NC}"
+            echo -e "${YELLOW}► Настройка интеграции dnsmasq ↔ nfqws...${NC}"
             
-            # Создание скрипта синхронизации списков
-            cat > /opt/etc/sync-dns-dpi.sh << 'SYNCSCRIPT'
+            cat > /opt/etc/sync-dns-dpi.sh << 'SYNCEOF'
 #!/bin/sh
-# Синхронизация списков доменов между dnsmasq и nfqws
+# Синхронизация списков между dnsmasq и nfqws
 
 DNSMASQ_CUSTOM="/opt/etc/dnsmasq.d/custom.conf"
 NFQWS_USER_LIST="/opt/etc/nfqws/user.list"
 
-# Извлечение доменов из dnsmasq и добавление в nfqws
 if [ -f "$DNSMASQ_CUSTOM" ]; then
+    mkdir -p "$(dirname $NFQWS_USER_LIST)"
+    
     grep "^address=" "$DNSMASQ_CUSTOM" | \
     sed 's|address=/\([^/]*\)/.*|\1|' | \
     sort -u > "$NFQWS_USER_LIST.tmp"
     
-    # Объединение с существующими
     if [ -f "$NFQWS_USER_LIST" ]; then
         cat "$NFQWS_USER_LIST" "$NFQWS_USER_LIST.tmp" | sort -u > "$NFQWS_USER_LIST.new"
         mv "$NFQWS_USER_LIST.new" "$NFQWS_USER_LIST"
@@ -220,25 +261,27 @@ if [ -f "$DNSMASQ_CUSTOM" ]; then
     
     rm -f "$NFQWS_USER_LIST.tmp"
     
-    # Перезапуск nfqws
     /opt/etc/init.d/S51nfqws restart >/dev/null 2>&1
     
-    echo "Списки синхронизированы: $(wc -l < $NFQWS_USER_LIST) доменов"
+    echo "Синхронизировано: $(wc -l < $NFQWS_USER_LIST) доменов"
 fi
-SYNCSCRIPT
+SYNCEOF
             
             chmod +x /opt/etc/sync-dns-dpi.sh
             
             # Добавление в cron
-            echo "10 3 * * * root /opt/etc/sync-dns-dpi.sh >> /opt/var/log/sync-dns-dpi.log 2>&1" >> /opt/etc/cron.d/sync-dns-dpi
+            mkdir -p /opt/etc/cron.d
+            echo "10 3 * * * root /opt/etc/sync-dns-dpi.sh >> /opt/var/log/sync-dns-dpi.log 2>&1" > /opt/etc/cron.d/sync-dns-dpi
             
             # Первая синхронизация
-            /opt/etc/sync-dns-dpi.sh
+            /opt/etc/sync-dns-dpi.sh >/dev/null 2>&1
             
             echo -e "${GREEN}✓ Интеграция настроена${NC}"
         fi
     else
         echo -e "${RED}✗ Ошибка установки nfqws${NC}"
+        echo "  Проверьте компоненты Keenetic (IPv6, Netfilter)"
+        NFQWS_OK=0
     fi
 fi
 
@@ -257,46 +300,54 @@ echo -e "${BLUE}║         Установка завершена!              
 echo -e "${BLUE}╚════════════════════════════════════════════════╝${NC}"
 echo ""
 
-if [ "$INSTALL_DNSMASQ" = "1" ]; then
+SUCCESS=0
+
+if [ "$INSTALL_DNSMASQ" = "1" ] && [ "$DNSMASQ_OK" = "1" ]; then
     echo -e "${GREEN}✅ dnsmasq установлен:${NC}"
     echo "   DNS сервер: 192.168.1.2:53"
     echo "   Команды:"
-    echo "     dns-status                          - статус"
-    echo "     /opt/etc/init.d/S56dnsmasq restart  - перезапуск"
+    echo "     dns-status"
+    echo "     /opt/etc/init.d/S56dnsmasq restart"
+    echo "     /opt/etc/update-hosts-auto.sh"
     echo ""
+    SUCCESS=1
 fi
 
-if [ "$INSTALL_NFQWS" = "1" ]; then
+if [ "$INSTALL_NFQWS" = "1" ] && [ "$NFQWS_OK" = "1" ]; then
     echo -e "${GREEN}✅ nfqws-keenetic установлен:${NC}"
     echo "   DPI bypass активен"
     echo "   Команды:"
-    echo "     /opt/etc/init.d/S51nfqws status     - статус"
-    echo "     /opt/etc/init.d/S51nfqws restart    - перезапуск"
+    echo "     /opt/etc/init.d/S51nfqws status"
+    echo "     /opt/etc/init.d/S51nfqws restart"
     echo "   Конфиг: /opt/etc/nfqws/nfqws.conf"
-    echo "   Домены: /opt/etc/nfqws/user.list"
     
     if [ -f /opt/bin/nfqws-keenetic-web ]; then
         echo "   Веб: http://192.168.1.1:90"
     fi
     echo ""
+    SUCCESS=1
 fi
 
-if [ "$INSTALL_DNSMASQ" = "1" ] && [ "$INSTALL_NFQWS" = "1" ]; then
+if [ "$INSTALL_DNSMASQ" = "1" ] && [ "$INSTALL_NFQWS" = "1" ] && [ "$DNSMASQ_OK" = "1" ] && [ "$NFQWS_OK" = "1" ]; then
     echo -e "${YELLOW}🔗 Интеграция:${NC}"
-    echo "   Домены из dnsmasq автоматически синхронизируются с nfqws"
     echo "   Синхронизация: /opt/etc/sync-dns-dpi.sh"
     echo ""
 fi
 
-echo -e "${YELLOW}📋 Настройка DNS в Keenetic:${NC}"
-if [ "$INSTALL_DNSMASQ" = "1" ]; then
-    echo "   http://192.168.1.1 → Интернет → Подключения"
-    echo "   DNS 1: 192.168.1.2"
-    echo "   DNS 2: 8.8.8.8"
+if [ "$INSTALL_DNSMASQ" = "1" ] && [ "$DNSMASQ_OK" = "1" ]; then
+    echo -e "${YELLOW}📋 Следующий шаг - настройка DNS в Keenetic:${NC}"
+    echo "   1. Откройте: http://192.168.1.1"
+    echo "   2. Интернет → Подключения → Ваше подключение"
+    echo "   3. DNS 1: 192.168.1.2"
+    echo "   4. DNS 2: 8.8.8.8"
 fi
 
 echo ""
-echo -e "${GREEN}Готово! Проверьте работу: dns-status${NC}"
-echo ""
 
-exit 0
+if [ "$SUCCESS" = "1" ]; then
+    echo -e "${GREEN}✅ Готово! Проверьте: dns-status${NC}"
+    exit 0
+else
+    echo -e "${RED}✗ Установка завершилась с ошибками${NC}"
+    exit 1
+fi
