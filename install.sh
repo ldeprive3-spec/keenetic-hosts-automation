@@ -11,7 +11,7 @@ set -e
 VERSION="2.0"
 INSTALL_DIR="/opt/etc"
 LOG_FILE="/opt/var/log/install-hosts.log"
-GITHUB_RAW="https://raw.githubusercontent.com/YOUR_USERNAME/keenetic-hosts-automation/main"
+GITHUB_RAW="https://raw.githubusercontent.com/ldeprive3-spec/keenetic-hosts-automation/main"
 
 # Colors
 RED='\033[0;31m'
