@@ -3,7 +3,7 @@
 # ================================================================
 # Keenetic DNS + DPI Bypass Automation
 # GitHub: https://github.com/ldeprive3-spec/keenetic-hosts-automation
-# Version: 2.2 - Auto port detection
+# Version: 2.3 - Support for dnsmasq-full
 # ================================================================
 
 RED='\033[0;31m'
@@ -16,7 +16,7 @@ REPO_URL="https://raw.githubusercontent.com/ldeprive3-spec/keenetic-hosts-automa
 TEMP_DIR="/tmp/keenetic-dns-setup"
 
 echo -e "${BLUE}╔════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║  Keenetic DNS + DPI Bypass Installer v2.2     ║${NC}"
+echo -e "${BLUE}║  Keenetic DNS + DPI Bypass Installer v2.3     ║${NC}"
 echo -e "${BLUE}║  dnsmasq + nfqws-keenetic                      ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════╝${NC}"
 echo ""
@@ -413,8 +413,16 @@ if [ "$INSTALL_DNSMASQ" = "1" ] && [ "$DNSMASQ_OK" = "1" ]; then
     DNSMASQ_PORT=$(grep "^port=" /opt/etc/dnsmasq.conf 2>/dev/null | cut -d= -f2)
     [ -z "$DNSMASQ_PORT" ] && DNSMASQ_PORT="53"
     
+    # Определяем пакет
+    if opkg list-installed 2>/dev/null | grep -q "^dnsmasq-full "; then
+        DNSMASQ_PKG="dnsmasq-full"
+    else
+        DNSMASQ_PKG="dnsmasq"
+    fi
+    
     echo -e "${GREEN}✅ dnsmasq установлен:${NC}"
     echo "   DNS сервер: 192.168.1.2:${DNSMASQ_PORT}"
+    echo "   Пакет: ${DNSMASQ_PKG}"
     echo "   Источники: GeoHide DNS + Zapret Discord/YouTube"
     echo "   Команды:"
     echo "     dns-status"
