@@ -1,262 +1,170 @@
 #!/bin/sh
 
-# ============================================================
-# HOSTS UPDATER FOR KEENETIC v2.0
-# Downloads, deduplicates, converts to dnsmasq format
-# ============================================================
+# ================================================================
+# Automatic Hosts Update Script with nfqws integration
+# GitHub: https://github.com/ldeprive3-spec/keenetic-hosts-automation
+# Version: 2.0
+# ================================================================
 
-TEMP_DIR="/tmp/hosts_updater_$$"
-SOURCES_LIST="/opt/etc/hosts-automation/sources.list"
-DNSMASQ_OUTPUT="/opt/etc/dnsmasq.d/custom.conf"
-BACKUP_DIR="/opt/etc/dnsmasq.d/backups"
 LOG_FILE="/opt/var/log/hosts-updater.log"
-STATS_FILE="/opt/var/log/hosts-stats.txt"
+HOSTS_DIR="/opt/etc/dnsmasq.d"
+TEMP_DIR="/tmp/hosts-update-$$"
+BACKUP_DIR="/opt/var/backups/hosts"
 
-log_msg() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+# Интеграция с nfqws
+NFQWS_USER_LIST="/opt/etc/nfqws/user.list"
+NFQWS_INSTALLED=0
+
+# Проверка наличия nfqws
+if [ -f "/opt/etc/init.d/S51nfqws" ]; then
+    NFQWS_INSTALLED=1
+fi
+
+# ================================================================
+# Источники
+# ================================================================
+STEVENBLACK_URL="https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"
+ADAWAY_URL="https://adaway.org/hosts.txt"
+
+# ================================================================
+# Функции
+# ================================================================
+
+log_message() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+    echo "$1"
 }
 
-log_msg "============================================================"
-log_msg "HOSTS UPDATER STARTED"
-log_msg "============================================================"
+download_file() {
+    local url="$1"
+    local output="$2"
+    
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$url" -o "$output" 2>>"$LOG_FILE"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q "$url" -O "$output" 2>>"$LOG_FILE"
+    else
+        return 1
+    fi
+    
+    return $?
+}
 
-# STEP 1: Prepare
-log_msg "[STEP 1/8] Preparing environment..."
+convert_to_dnsmasq() {
+    local input="$1"
+    local output="$2"
+    
+    grep -E "^(0\.0\.0\.0|127\.0\.0\.1)" "$input" | \
+    grep -v "^#" | \
+    grep -v "localhost" | \
+    awk '{print "address=/"$2"/0.0.0.0"}' | \
+    sort -u > "$output"
+}
+
+extract_domains_for_nfqws() {
+    local input="$1"
+    local output="$2"
+    
+    # Извлечение доменов из dnsmasq формата
+    grep "^address=" "$input" | \
+    sed 's|address=/\([^/]*\)/.*|\1|' | \
+    sort -u > "$output"
+}
+
+# ================================================================
+# Главная логика
+# ================================================================
+
+log_message "========================================"
+log_message "Начало обновления hosts"
+log_message "nfqws интеграция: $([ $NFQWS_INSTALLED -eq 1 ] && echo 'ДА' || echo 'НЕТ')"
+log_message "========================================"
 
 mkdir -p "$TEMP_DIR"
 mkdir -p "$BACKUP_DIR"
-mkdir -p "$(dirname "$LOG_FILE")"
+mkdir -p "$HOSTS_DIR"
 
-find /tmp -name "hosts_updater_*" -type d -mtime +1 -exec rm -rf {} + 2>/dev/null
+# Бэкап
+if [ -f "$HOSTS_DIR/auto-blocked.conf" ]; then
+    BACKUP_FILE="$BACKUP_DIR/auto-blocked-$(date +%Y%m%d-%H%M%S).conf"
+    cp "$HOSTS_DIR/auto-blocked.conf" "$BACKUP_FILE"
+    log_message "Бэкап: $BACKUP_FILE"
+    
+    ls -t "$BACKUP_DIR"/auto-blocked-*.conf 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null
+fi
 
-log_msg "[OK] Environment ready"
+TOTAL_ENTRIES=0
 
-# STEP 2: Backup
-log_msg "[STEP 2/8] Creating backup..."
+# ================================================================
+# Загрузка источников
+# ================================================================
 
-if [ -f "$DNSMASQ_OUTPUT" ]; then
-    BACKUP_FILE="$BACKUP_DIR/custom.conf.$(date '+%Y%m%d_%H%M%S')"
-    cp "$DNSMASQ_OUTPUT" "$BACKUP_FILE"
-    OLD_ENTRIES=$(grep -c "^address=" "$DNSMASQ_OUTPUT" 2>/dev/null || echo 0)
-    log_msg "[OK] Backup: $BACKUP_FILE"
-    log_msg "[INFO] Old entries: $OLD_ENTRIES"
+log_message "Загрузка StevenBlack hosts..."
+if download_file "$STEVENBLACK_URL" "$TEMP_DIR/stevenblack.txt"; then
+    convert_to_dnsmasq "$TEMP_DIR/stevenblack.txt" "$TEMP_DIR/stevenblack.conf"
+    ENTRIES=$(wc -l < "$TEMP_DIR/stevenblack.conf")
+    TOTAL_ENTRIES=$((TOTAL_ENTRIES + ENTRIES))
+    log_message "✓ StevenBlack: $ENTRIES записей"
 else
-    OLD_ENTRIES=0
-    log_msg "[INFO] No existing configuration"
+    log_message "✗ Ошибка загрузки StevenBlack"
 fi
 
-# STEP 3: Download sources
-log_msg "[STEP 3/8] Downloading sources..."
+# ================================================================
+# Объединение
+# ================================================================
 
-if [ ! -f "$SOURCES_LIST" ]; then
-    log_msg "[ERROR] sources.list not found: $SOURCES_LIST"
-    rm -rf "$TEMP_DIR"
-    exit 1
-fi
-
-SUCCESS_COUNT=0
-TOTAL_SOURCES=0
-SOURCE_INDEX=0
-
-while IFS='|' read -r URL NAME; do
-    # Skip comments and empty lines
-    echo "$URL" | grep -qE '^#|^$' && continue
-
-    TOTAL_SOURCES=$((TOTAL_SOURCES + 1))
-done < "$SOURCES_LIST"
-
-while IFS='|' read -r URL NAME; do
-    # Skip comments
-    echo "$URL" | grep -qE '^#|^$' && continue
-
-    SOURCE_INDEX=$((SOURCE_INDEX + 1))
-    SOURCE_FILE="$TEMP_DIR/source${SOURCE_INDEX}.txt"
-
-    log_msg "  [$SOURCE_INDEX/$TOTAL_SOURCES] $NAME"
-
-    if wget -q --timeout=30 --tries=3 -O "$SOURCE_FILE" "$URL" 2>/dev/null; then
-        SIZE=$(wc -c < "$SOURCE_FILE")
-        LINES=$(wc -l < "$SOURCE_FILE")
-
-        if head -n 5 "$SOURCE_FILE" | grep -qE '<!DOCTYPE|<html|<head>'; then
-            log_msg "    [ERROR] HTML detected"
-            rm -f "$SOURCE_FILE"
+if [ $TOTAL_ENTRIES -gt 0 ]; then
+    log_message "Объединение списков..."
+    
+    cat "$TEMP_DIR"/*.conf 2>/dev/null | sort -u > "$TEMP_DIR/combined.conf"
+    
+    FINAL_COUNT=$(wc -l < "$TEMP_DIR/combined.conf")
+    
+    mv "$TEMP_DIR/combined.conf" "$HOSTS_DIR/auto-blocked.conf"
+    chmod 644 "$HOSTS_DIR/auto-blocked.conf"
+    
+    log_message "✓ Итого записей: $FINAL_COUNT"
+    
+    # ================================================================
+    # Интеграция с nfqws
+    # ================================================================
+    if [ $NFQWS_INSTALLED -eq 1 ]; then
+        log_message "Синхронизация с nfqws..."
+        
+        extract_domains_for_nfqws "$HOSTS_DIR/auto-blocked.conf" "$TEMP_DIR/nfqws-domains.txt"
+        
+        if [ -f "$NFQWS_USER_LIST" ]; then
+            cat "$NFQWS_USER_LIST" "$TEMP_DIR/nfqws-domains.txt" | sort -u > "$NFQWS_USER_LIST.new"
+            mv "$NFQWS_USER_LIST.new" "$NFQWS_USER_LIST"
         else
-            log_msg "    [OK] $SIZE bytes, $LINES lines"
-            SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+            mkdir -p "$(dirname $NFQWS_USER_LIST)"
+            mv "$TEMP_DIR/nfqws-domains.txt" "$NFQWS_USER_LIST"
         fi
+        
+        NFQWS_COUNT=$(wc -l < "$NFQWS_USER_LIST")
+        log_message "✓ nfqws: $NFQWS_COUNT доменов"
+        
+        # Перезапуск nfqws
+        /opt/etc/init.d/S51nfqws restart >> "$LOG_FILE" 2>&1
+    fi
+    
+    # Перезапуск dnsmasq
+    log_message "Перезапуск dnsmasq..."
+    if /opt/etc/init.d/S56dnsmasq restart >> "$LOG_FILE" 2>&1; then
+        log_message "✓ dnsmasq перезапущен"
     else
-        log_msg "    [ERROR] Download failed"
+        log_message "✗ Ошибка перезапуска dnsmasq"
     fi
-done < "$SOURCES_LIST"
-
-log_msg "[INFO] Downloaded: $SUCCESS_COUNT/$TOTAL_SOURCES"
-
-if [ $SUCCESS_COUNT -eq 0 ]; then
-    log_msg "[ERROR] No sources downloaded"
-    rm -rf "$TEMP_DIR"
-    exit 1
-fi
-
-# STEP 4: Parse and deduplicate
-log_msg "[STEP 4/8] Parsing and deduplicating..."
-
-DOMAINS_FILE="$TEMP_DIR/all_domains.txt"
-> "$DOMAINS_FILE"
-
-for SOURCE_FILE in "$TEMP_DIR"/source*.txt; do
-    if [ -f "$SOURCE_FILE" ]; then
-        grep -vE '^#|^$|^REM|localhost' "$SOURCE_FILE" | \
-        awk '{
-            if (NF == 1) {
-                print "0.0.0.0 " $1
-            } else if (NF >= 2) {
-                print $1 " " $2
-            }
-        }' >> "$DOMAINS_FILE"
-    fi
-done
-
-TOTAL_LINES=$(wc -l < "$DOMAINS_FILE")
-log_msg "[INFO] Total lines: $TOTAL_LINES"
-
-DEDUP_FILE="$TEMP_DIR/domains_dedup.txt"
-awk '!seen[$2]++' "$DOMAINS_FILE" > "$DEDUP_FILE"
-
-UNIQUE_DOMAINS=$(wc -l < "$DEDUP_FILE")
-DUPLICATES=$((TOTAL_LINES - UNIQUE_DOMAINS))
-
-log_msg "[OK] Deduplication completed"
-log_msg "  Unique: $UNIQUE_DOMAINS"
-log_msg "  Duplicates: $DUPLICATES"
-
-# STEP 5: Convert to dnsmasq
-log_msg "[STEP 5/8] Converting to dnsmasq format..."
-
-TEMP_OUTPUT="$TEMP_DIR/custom.conf"
-> "$TEMP_OUTPUT"
-
-cat >> "$TEMP_OUTPUT" << HEADER
-# ============================================================
-# Custom DNS entries - Auto-generated
-# Updated: $(date '+%Y-%m-%d %H:%M:%S')
-# Sources: $SUCCESS_COUNT/$TOTAL_SOURCES
-# Unique domains: $UNIQUE_DOMAINS
-# ============================================================
-
-HEADER
-
-BLOCKED_0000=0
-REDIRECT_127=0
-REDIRECT_OTHER=0
-
-while read -r IP DOMAIN; do
-    if ! echo "$DOMAIN" | grep -qE '^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'; then
-        continue
-    fi
-
-    case "$IP" in
-        0.0.0.0)
-            echo "address=/$DOMAIN/" >> "$TEMP_OUTPUT"
-            BLOCKED_0000=$((BLOCKED_0000 + 1))
-            ;;
-        127.0.0.1|::1)
-            echo "address=/$DOMAIN/127.0.0.1" >> "$TEMP_OUTPUT"
-            REDIRECT_127=$((REDIRECT_127 + 1))
-            ;;
-        *)
-            echo "address=/$DOMAIN/$IP" >> "$TEMP_OUTPUT"
-            REDIRECT_OTHER=$((REDIRECT_OTHER + 1))
-            ;;
-    esac
-done < "$DEDUP_FILE"
-
-TOTAL_ENTRIES=$((BLOCKED_0000 + REDIRECT_127 + REDIRECT_OTHER))
-
-log_msg "[OK] Conversion completed"
-log_msg "  Total entries: $TOTAL_ENTRIES"
-log_msg "  Blocked (0.0.0.0): $BLOCKED_0000"
-log_msg "  Redirected (127.0.0.1): $REDIRECT_127"
-log_msg "  Custom: $REDIRECT_OTHER"
-
-cat >> "$TEMP_OUTPUT" << FOOTER
-
-# ============================================================
-# Statistics:
-#   Total: $TOTAL_ENTRIES
-#   Blocked: $BLOCKED_0000
-#   Redirected: $REDIRECT_127
-#   Custom: $REDIRECT_OTHER
-# ============================================================
-FOOTER
-
-# STEP 6: Install
-log_msg "[STEP 6/8] Installing configuration..."
-
-if [ -s "$TEMP_OUTPUT" ]; then
-    cp "$TEMP_OUTPUT" "$DNSMASQ_OUTPUT"
-    log_msg "[OK] Installed: $DNSMASQ_OUTPUT"
 else
-    log_msg "[ERROR] Empty file, keeping old config"
-    rm -rf "$TEMP_DIR"
-    exit 1
+    log_message "✗ Не загружено записей"
 fi
 
-# STEP 7: Restart dnsmasq
-log_msg "[STEP 7/8] Restarting dnsmasq..."
-
-if [ -f /opt/etc/init.d/S56dnsmasq ]; then
-    /opt/etc/init.d/S56dnsmasq restart >/dev/null 2>&1
-    log_msg "[OK] dnsmasq restarted (S56)"
-elif [ -f /opt/etc/init.d/S05dnsmasq ]; then
-    /opt/etc/init.d/S05dnsmasq restart >/dev/null 2>&1
-    log_msg "[OK] dnsmasq restarted (S05)"
-else
-    killall dnsmasq 2>/dev/null
-    sleep 1
-    dnsmasq --conf-file=/opt/etc/dnsmasq.conf 2>/dev/null &
-    log_msg "[OK] dnsmasq restarted (manual)"
-fi
-
-sleep 2
-
-# STEP 8: Test and cleanup
-log_msg "[STEP 8/8] Testing and cleanup..."
-
-TEST_DOMAIN=$(grep -m 1 "^address=/" "$DNSMASQ_OUTPUT" | sed 's/address=\/\([^\/]*\)\/.*/\1/')
-
-if [ -n "$TEST_DOMAIN" ]; then
-    if nslookup "$TEST_DOMAIN" 127.0.0.1 >/dev/null 2>&1; then
-        log_msg "[OK] DNS test passed: $TEST_DOMAIN"
-    else
-        log_msg "[WARNING] DNS test failed: $TEST_DOMAIN"
-    fi
-fi
-
-# Save stats
-cat > "$STATS_FILE" << STATS
-Last update: $(date '+%Y-%m-%d %H:%M:%S')
-Sources: $SUCCESS_COUNT/$TOTAL_SOURCES
-Unique domains: $UNIQUE_DOMAINS
-Total entries: $TOTAL_ENTRIES
-  - Blocked (0.0.0.0): $BLOCKED_0000
-  - Redirected (127.0.0.1): $REDIRECT_127
-  - Custom redirects: $REDIRECT_OTHER
-Previous: $OLD_ENTRIES
-Difference: $((TOTAL_ENTRIES - OLD_ENTRIES))
-STATS
-
-# Cleanup
+# Очистка
 rm -rf "$TEMP_DIR"
 
-# Keep last 7 backups
-ls -t "$BACKUP_DIR"/custom.conf.* 2>/dev/null | tail -n +8 | xargs rm -f 2>/dev/null
-
-log_msg "[OK] Cleanup completed"
-log_msg "============================================================"
-log_msg "UPDATE COMPLETED"
-log_msg "  Old: $OLD_ENTRIES | New: $TOTAL_ENTRIES | Diff: $((TOTAL_ENTRIES - OLD_ENTRIES))"
-log_msg "============================================================"
-log_msg ""
+log_message "========================================"
+log_message "Обновление завершено"
+log_message "========================================"
+log_message ""
 
 exit 0
