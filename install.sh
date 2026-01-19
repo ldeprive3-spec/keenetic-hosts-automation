@@ -3,7 +3,7 @@
 # ================================================================
 # Keenetic DNS + DPI Bypass Automation
 # GitHub: https://github.com/ldeprive3-spec/keenetic-hosts-automation
-# Version: 2.0
+# Version: 2.1 - Fixed for ndnproxy compatibility
 # ================================================================
 
 RED='\033[0;31m'
@@ -16,7 +16,7 @@ REPO_URL="https://raw.githubusercontent.com/ldeprive3-spec/keenetic-hosts-automa
 TEMP_DIR="/tmp/keenetic-dns-setup"
 
 echo -e "${BLUE}╔════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║  Keenetic DNS + DPI Bypass Installer          ║${NC}"
+echo -e "${BLUE}║  Keenetic DNS + DPI Bypass Installer v2.1     ║${NC}"
 echo -e "${BLUE}║  dnsmasq + nfqws-keenetic                      ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════╝${NC}"
 echo ""
@@ -43,6 +43,48 @@ if [ ! -d "/opt/etc" ] || [ ! -f "/opt/bin/opkg" ]; then
 fi
 
 echo -e "${GREEN}✓ Entware: установлен${NC}"
+
+# ================================================================
+# Проверка конфликтов (НОВОЕ)
+# ================================================================
+echo ""
+echo -e "${YELLOW}► Проверка существующих сервисов...${NC}"
+
+# Проверка ndnproxy
+if ps | grep -q "ndnproxy"; then
+    echo -e "${BLUE}  ℹ Обнаружен ndnproxy (встроенный DNS Keenetic)${NC}"
+    echo -e "${BLUE}  ℹ dnsmasq будет работать совместно с ndnproxy${NC}"
+    NDNPROXY_DETECTED=1
+else
+    NDNPROXY_DETECTED=0
+fi
+
+# Проверка других DNS серверов
+if ps | grep -E "named|bind|unbound" | grep -v grep >/dev/null; then
+    echo -e "${YELLOW}  ⚠ Обнаружены другие DNS серверы${NC}"
+    ps | grep -E "named|bind|unbound" | grep -v grep
+    echo ""
+    echo -e "${YELLOW}  Продолжить? (Ctrl+C для отмены, Enter для продолжения)${NC}"
+    read dummy
+fi
+
+# Проверка AdGuard Home
+if [ -f "/opt/etc/init.d/S99adguardhome" ] || pgrep -f "AdGuardHome" >/dev/null; then
+    echo -e "${RED}  ✗ Обнаружен AdGuard Home!${NC}"
+    echo -e "${RED}  ✗ AdGuard Home конфликтует с dnsmasq (оба используют DNS порты)${NC}"
+    echo ""
+    echo -e "${YELLOW}  Варианты:${NC}"
+    echo "  1. Удалите AdGuard Home и используйте dnsmasq"
+    echo "  2. Или установите только nfqws (MODE=2)"
+    echo ""
+    echo -e "${YELLOW}  Продолжить? (y/N)${NC}"
+    read answer
+    if [ "$answer" != "y" ] && [ "$answer" != "Y" ]; then
+        exit 1
+    fi
+fi
+
+echo -e "${GREEN}✓ Проверка конфликтов завершена${NC}"
 
 # ================================================================
 # Определение режима установки
@@ -247,6 +289,13 @@ EOFLIST
             echo -e "${GREEN}✓ sources.list уже существует${NC}"
         fi
         
+        # Настройка cron для обновления hosts
+        mkdir -p /opt/etc/cron.d
+        cat > /opt/etc/cron.d/update-hosts << 'EOFCRON'
+# Update hosts daily at 3:00 AM
+0 3 * * * root /opt/etc/update-hosts-auto.sh >> /opt/var/log/hosts-updater.log 2>&1
+EOFCRON
+        
         echo -e "${GREEN}✓ Скрипт обновления установлен${NC}"
         echo ""
         echo -e "${BLUE}💡 Настройка источников:${NC}"
@@ -354,13 +403,23 @@ echo ""
 SUCCESS=0
 
 if [ "$INSTALL_DNSMASQ" = "1" ] && [ "$DNSMASQ_OK" = "1" ]; then
+    # Определяем порт
+    DNSMASQ_PORT=$(grep "^port=" /opt/etc/dnsmasq.conf 2>/dev/null | cut -d= -f2)
+    [ -z "$DNSMASQ_PORT" ] && DNSMASQ_PORT="5353"
+    
     echo -e "${GREEN}✅ dnsmasq установлен:${NC}"
-    echo "   DNS сервер: 192.168.1.2:53"
+    echo "   DNS сервер: 192.168.1.2:${DNSMASQ_PORT}"
     echo "   Источники: GeoHide DNS + Zapret Discord/YouTube"
     echo "   Команды:"
     echo "     dns-status"
     echo "     /opt/etc/init.d/S56dnsmasq restart"
     echo "     /opt/etc/update-hosts-auto.sh"
+    
+    if [ "$DNSMASQ_PORT" != "53" ]; then
+        echo ""
+        echo -e "${YELLOW}   ℹ Порт: ${DNSMASQ_PORT} (порт 53 занят ndnproxy)${NC}"
+    fi
+    
     echo ""
     SUCCESS=1
 fi
@@ -392,6 +451,11 @@ if [ "$INSTALL_DNSMASQ" = "1" ] && [ "$DNSMASQ_OK" = "1" ]; then
     echo "   2. Интернет → Подключения → Ваше подключение"
     echo "   3. DNS 1: 192.168.1.2"
     echo "   4. DNS 2: 8.8.8.8"
+    
+    if [ "$NDNPROXY_DETECTED" = "1" ]; then
+        echo ""
+        echo -e "${BLUE}   ℹ ndnproxy переадресует DNS запросы на dnsmasq${NC}"
+    fi
 fi
 
 echo ""
