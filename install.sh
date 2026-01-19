@@ -3,7 +3,7 @@
 # ================================================================
 # Keenetic DNS + DPI Bypass Automation
 # GitHub: https://github.com/ldeprive3-spec/keenetic-hosts-automation
-# Version: 2.1 - Fixed for ndnproxy compatibility
+# Version: 2.2 - Auto port detection
 # ================================================================
 
 RED='\033[0;31m'
@@ -16,7 +16,7 @@ REPO_URL="https://raw.githubusercontent.com/ldeprive3-spec/keenetic-hosts-automa
 TEMP_DIR="/tmp/keenetic-dns-setup"
 
 echo -e "${BLUE}╔════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║  Keenetic DNS + DPI Bypass Installer v2.1     ║${NC}"
+echo -e "${BLUE}║  Keenetic DNS + DPI Bypass Installer v2.2     ║${NC}"
 echo -e "${BLUE}║  dnsmasq + nfqws-keenetic                      ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════╝${NC}"
 echo ""
@@ -45,7 +45,7 @@ fi
 echo -e "${GREEN}✓ Entware: установлен${NC}"
 
 # ================================================================
-# Проверка конфликтов (НОВОЕ)
+# Проверка конфликтов
 # ================================================================
 echo ""
 echo -e "${YELLOW}► Проверка существующих сервисов...${NC}"
@@ -57,6 +57,12 @@ if ps | grep -q "ndnproxy"; then
     NDNPROXY_DETECTED=1
 else
     NDNPROXY_DETECTED=0
+fi
+
+# Проверка avahi-daemon
+if ps | grep -q "avahi-daemon"; then
+    echo -e "${BLUE}  ℹ Обнаружен avahi-daemon (mDNS/Bonjour)${NC}"
+    echo -e "${BLUE}  ℹ dnsmasq автоматически выберет свободный порт${NC}"
 fi
 
 # Проверка других DNS серверов
@@ -405,7 +411,7 @@ SUCCESS=0
 if [ "$INSTALL_DNSMASQ" = "1" ] && [ "$DNSMASQ_OK" = "1" ]; then
     # Определяем порт
     DNSMASQ_PORT=$(grep "^port=" /opt/etc/dnsmasq.conf 2>/dev/null | cut -d= -f2)
-    [ -z "$DNSMASQ_PORT" ] && DNSMASQ_PORT="5353"
+    [ -z "$DNSMASQ_PORT" ] && DNSMASQ_PORT="53"
     
     echo -e "${GREEN}✅ dnsmasq установлен:${NC}"
     echo "   DNS сервер: 192.168.1.2:${DNSMASQ_PORT}"
@@ -417,7 +423,7 @@ if [ "$INSTALL_DNSMASQ" = "1" ] && [ "$DNSMASQ_OK" = "1" ]; then
     
     if [ "$DNSMASQ_PORT" != "53" ]; then
         echo ""
-        echo -e "${YELLOW}   ℹ Порт: ${DNSMASQ_PORT} (порт 53 занят ndnproxy)${NC}"
+        echo -e "${YELLOW}   ℹ Порт: ${DNSMASQ_PORT} (порт 53 занят)${NC}"
     fi
     
     echo ""
