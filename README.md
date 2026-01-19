@@ -169,7 +169,7 @@ opkg upgrade nfqws-keenetic nfqws-keenetic-web
 
 # Обновить скрипт hosts-automation
 cd /opt/etc
-wget -qO update-hosts-auto.sh https://raw.githubusercontent.com/YOUR_USERNAME/keenetic-hosts-automation/main/scripts/update-hosts-auto.sh
+wget -qO update-hosts-auto.sh https://raw.githubusercontent.com/ldeprive3-spec/keenetic-hosts-automation/main/scripts/update-hosts-auto.sh
 chmod +x update-hosts-auto.sh
 ```
 
@@ -318,7 +318,7 @@ cat /opt/etc/cron.d/update-hosts
 
 ## 💡 Поддержка
 
-- **GitHub Issues:** https://github.com/YOUR_USERNAME/keenetic-hosts-automation/issues
+- **Automation Issues:** https://github.com/YOUR_USERNAME/keenetic-hosts-automation/issues
 - **nfqws-keenetic Issues:** https://github.com/Anonym-tsk/nfqws-keenetic/issues
 - **Discussions:** https://github.com/Anonym-tsk/nfqws-keenetic/discussions
 
