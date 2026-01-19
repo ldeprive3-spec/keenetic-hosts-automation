@@ -11,7 +11,7 @@ set -e
 VERSION="2.0"
 INSTALL_DIR="/opt/etc"
 LOG_FILE="/opt/var/log/install-hosts.log"
-GITHUB_RAW="https://raw.githubusercontent.com/ldeprive3-spec/keenetic-hosts-automation/main"
+GITHUB_RAW="https://raw.githubusercontent.com/ldeprive3-spec/keenetic-hosts-automation/refs/heads/main"
 
 # Colors
 RED='\033[0;31m'
@@ -115,18 +115,18 @@ if [ $NFQWS_INSTALLED -eq 0 ]; then
     echo ""
     printf "  Install? [Y/n]: "
     read -r INSTALL_NFQWS
-
+    
     if [ -z "$INSTALL_NFQWS" ] || [ "$INSTALL_NFQWS" = "y" ] || [ "$INSTALL_NFQWS" = "Y" ]; then
         # Add repository
         print_info "Adding nfqws-keenetic repository..."
         mkdir -p /opt/etc/opkg
         echo "src/gz nfqws-keenetic https://anonym-tsk.github.io/nfqws-keenetic/all" > /opt/etc/opkg/nfqws-keenetic.conf
-
+        
         # Update and install
         print_info "Installing nfqws-keenetic..."
         opkg update >/dev/null 2>&1
         opkg install nfqws-keenetic nfqws-keenetic-web >/dev/null 2>&1
-
+        
         if opkg list-installed | grep -q "nfqws-keenetic"; then
             print_success "nfqws-keenetic installed"
             ROUTER_IP=$(ip route get 1 2>/dev/null | awk '{print $7; exit}')
@@ -194,7 +194,7 @@ mkdir -p /opt/etc/hosts-automation
 
 # Download main script
 print_info "Downloading update-hosts-auto.sh..."
-if wget -q -O "$INSTALL_DIR/update-hosts-auto.sh" "$GITHUB_RAW/scripts/update-hosts-auto.sh" 2>/dev/null; then
+if wget -q -O "$INSTALL_DIR/update-hosts-auto.sh" "$GITHUB_RAW/update-hosts-auto.sh" 2>/dev/null; then
     chmod +x "$INSTALL_DIR/update-hosts-auto.sh"
     print_success "update-hosts-auto.sh downloaded"
 else
@@ -203,7 +203,7 @@ fi
 
 # Download config
 print_info "Downloading sources.list..."
-if wget -q -O /opt/etc/hosts-automation/sources.list "$GITHUB_RAW/config/sources.list" 2>/dev/null; then
+if wget -q -O /opt/etc/hosts-automation/sources.list "$GITHUB_RAW/sources.list" 2>/dev/null; then
     print_success "sources.list downloaded"
 else
     # Create default sources.list
@@ -226,7 +226,7 @@ print_step "6" "7" "Downloading hosts lists"
 if [ -f "$INSTALL_DIR/update-hosts-auto.sh" ]; then
     print_info "Running initial hosts update (this may take a minute)..."
     $INSTALL_DIR/update-hosts-auto.sh >/dev/null 2>&1
-
+    
     ENTRIES=$(grep -c "^address=" /opt/etc/dnsmasq.d/custom.conf 2>/dev/null || echo 0)
     print_success "Hosts updated: $ENTRIES entries"
 else
