@@ -1,0 +1,10 @@
+# Hosts sources list
+# Format: URL|Description
+# Lines starting with # are ignored
+
+# Main sources
+https://raw.githubusercontent.com/Internet-Helper/GeoHideDNS/refs/heads/main/hosts/hosts|GeoHide DNS
+https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/.service/hosts|Zapret Discord Voice
+
+# Add your custom sources below:
+# https://example.com/hosts.txt|My Custom List
