@@ -26,7 +26,7 @@
 ### Одной командой
 
 ```bash
-ssh -p 222 root@192.168.1.1 "wget -qO- https://raw.githubusercontent.com/YOUR_USERNAME/keenetic-hosts-automation/main/install.sh | sh"
+ssh -p 222 root@192.168.1.1 "wget -qO- https://raw.githubusercontent.com/ldeprive3-spec/keenetic-hosts-automation/main/install.sh | sh"
 ```
 
 **Что устанавливается:**
@@ -318,7 +318,7 @@ cat /opt/etc/cron.d/update-hosts
 
 ## 💡 Поддержка
 
-- **Automation Issues:** https://github.com/YOUR_USERNAME/keenetic-hosts-automation/issues
+- **Automation Issues:** https://github.com/ldeprive3-spec/keenetic-hosts-automation/issues
 - **nfqws-keenetic Issues:** https://github.com/Anonym-tsk/nfqws-keenetic/issues
 - **Discussions:** https://github.com/Anonym-tsk/nfqws-keenetic/discussions
 
