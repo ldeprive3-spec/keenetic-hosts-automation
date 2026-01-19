@@ -47,16 +47,11 @@ echo -e "${GREEN}✓ Entware: установлен${NC}"
 # ================================================================
 # Определение режима установки
 # ================================================================
-# Можно передать через переменную окружения или параметр
-# Например: MODE=1 curl ... | sh
-# Или: sh install.sh 1
-
 if [ -n "$1" ]; then
     INSTALL_MODE="$1"
 elif [ -n "$MODE" ]; then
     INSTALL_MODE="$MODE"
 else
-    # По умолчанию полная установка (режим 3)
     INSTALL_MODE=3
 fi
 
@@ -119,7 +114,6 @@ if [ "$INSTALL_NFQWS" = "1" ]; then
     echo ""
     echo -e "${YELLOW}► Проверка компонентов Keenetic для nfqws...${NC}"
     
-    # Проверка IPv6
     if ! ip -6 addr show >/dev/null 2>&1; then
         echo -e "${YELLOW}⚠ IPv6 не включен${NC}"
         echo "  Включите: http://192.168.1.1 → Управление → Компоненты → Протокол IPv6"
@@ -130,7 +124,6 @@ if [ "$INSTALL_NFQWS" = "1" ]; then
         INSTALL_NFQWS=0
     fi
     
-    # Проверка netfilter модулей
     if [ "$INSTALL_NFQWS" = "1" ] && ! lsmod 2>/dev/null | grep -q "nf_"; then
         echo -e "${YELLOW}⚠ Netfilter модули не найдены${NC}"
         echo "  Установите: http://192.168.1.1 → Управление → Компоненты"
@@ -186,13 +179,78 @@ if [ "$INSTALL_DNSMASQ" = "1" ]; then
         DNSMASQ_OK=0
     fi
     
-    # Копирование update-hosts-auto.sh
+    # Копирование update-hosts-auto.sh и создание sources.list
     if [ "$DNSMASQ_OK" = "1" ]; then
         echo ""
         echo -e "${YELLOW}► Установка скрипта обновления...${NC}"
+        
+        # Скачать скрипт обновления
         $DOWNLOAD_CMD "${REPO_URL}/update-hosts-auto.sh" > /opt/etc/update-hosts-auto.sh 2>/dev/null
         chmod +x /opt/etc/update-hosts-auto.sh
+        
+        # Создать директорию для sources.list
+        SOURCES_DIR="/opt/etc/hosts-automation"
+        SOURCES_FILE="$SOURCES_DIR/sources.list"
+        
+        mkdir -p "$SOURCES_DIR"
+        
+        # Создать sources.list если не существует
+        if [ ! -f "$SOURCES_FILE" ]; then
+            echo "  Создание sources.list с вашими источниками..."
+            cat > "$SOURCES_FILE" << 'EOFLIST'
+# ============================================================
+# HOSTS SOURCES LIST
+# Format: URL|Description
+# Lines starting with # are ignored
+# ============================================================
+
+# ============================================================
+# PRIMARY SOURCES
+# ============================================================
+
+# GeoHide DNS - разблокировка заблокированных сайтов
+https://raw.githubusercontent.com/Internet-Helper/GeoHideDNS/refs/heads/main/hosts/hosts|dns.geohide.ru: hosts file
+
+# Zapret Discord/YouTube - обход блокировок Discord и YouTube
+https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/.service/hosts|Zapret Discord/YouTube
+
+# ============================================================
+# OPTIONAL SOURCES (раскомментируйте при необходимости)
+# ============================================================
+
+# StevenBlack unified hosts - комплексная блокировка рекламы
+#https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts|StevenBlack Unified
+
+# AdAway - блокировка мобильной рекламы
+#https://adaway.org/hosts.txt|AdAway
+
+# AdGuard DNS filter
+#https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt|AdGuard DNS
+
+# Dan Pollock's hosts
+#https://someonewhocares.org/hosts/zero/hosts|Dan Pollock
+
+# Peter Lowe's Ad Server List
+#https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext|Peter Lowe
+
+# ============================================================
+# CUSTOM SOURCES
+# ============================================================
+
+# Добавьте свои источники ниже в формате:
+# URL|Описание
+
+EOFLIST
+            echo -e "${GREEN}✓ sources.list создан: $SOURCES_FILE${NC}"
+            echo -e "${BLUE}  Источники: GeoHide DNS + Zapret Discord/YouTube${NC}"
+        else
+            echo -e "${GREEN}✓ sources.list уже существует${NC}"
+        fi
+        
         echo -e "${GREEN}✓ Скрипт обновления установлен${NC}"
+        echo ""
+        echo -e "${BLUE}💡 Настройка источников:${NC}"
+        echo "   nano $SOURCES_FILE"
     fi
 fi
 
@@ -203,18 +261,15 @@ if [ "$INSTALL_NFQWS" = "1" ]; then
     echo ""
     echo -e "${YELLOW}► Установка nfqws-keenetic...${NC}"
     
-    # Установка зависимостей
     echo "  Установка зависимостей..."
     opkg update >/dev/null 2>&1
     opkg install ca-certificates wget-ssl >/dev/null 2>&1
     opkg remove wget-nossl >/dev/null 2>&1
     
-    # Добавление репозитория
     echo "  Добавление репозитория nfqws..."
     mkdir -p /opt/etc/opkg
     echo "src/gz nfqws-keenetic https://anonym-tsk.github.io/nfqws-keenetic/all" > /opt/etc/opkg/nfqws-keenetic.conf
     
-    # Установка
     echo "  Установка пакетов..."
     opkg update >/dev/null 2>&1
     opkg install nfqws-keenetic >/dev/null 2>&1
@@ -223,7 +278,6 @@ if [ "$INSTALL_NFQWS" = "1" ]; then
         echo -e "${GREEN}✓ nfqws-keenetic установлен${NC}"
         NFQWS_OK=1
         
-        # Опциональный веб-интерфейс
         echo ""
         echo -e "${YELLOW}  Установка веб-интерфейса nfqws...${NC}"
         opkg install nfqws-keenetic-web >/dev/null 2>&1
@@ -233,7 +287,6 @@ if [ "$INSTALL_NFQWS" = "1" ]; then
             echo -e "${YELLOW}⚠ Веб-интерфейс не установлен (необязательно)${NC}"
         fi
         
-        # Интеграция с dnsmasq
         if [ "$INSTALL_DNSMASQ" = "1" ] && [ "$DNSMASQ_OK" = "1" ]; then
             echo ""
             echo -e "${YELLOW}► Настройка интеграции dnsmasq ↔ nfqws...${NC}"
@@ -269,11 +322,9 @@ SYNCEOF
             
             chmod +x /opt/etc/sync-dns-dpi.sh
             
-            # Добавление в cron
             mkdir -p /opt/etc/cron.d
             echo "10 3 * * * root /opt/etc/sync-dns-dpi.sh >> /opt/var/log/sync-dns-dpi.log 2>&1" > /opt/etc/cron.d/sync-dns-dpi
             
-            # Первая синхронизация
             /opt/etc/sync-dns-dpi.sh >/dev/null 2>&1
             
             echo -e "${GREEN}✓ Интеграция настроена${NC}"
@@ -305,6 +356,7 @@ SUCCESS=0
 if [ "$INSTALL_DNSMASQ" = "1" ] && [ "$DNSMASQ_OK" = "1" ]; then
     echo -e "${GREEN}✅ dnsmasq установлен:${NC}"
     echo "   DNS сервер: 192.168.1.2:53"
+    echo "   Источники: GeoHide DNS + Zapret Discord/YouTube"
     echo "   Команды:"
     echo "     dns-status"
     echo "     /opt/etc/init.d/S56dnsmasq restart"
