@@ -2,7 +2,7 @@
 
 # ================================================================
 # dnsmasq Setup for Keenetic - Auto port detection
-# Version: 2.2
+# Version: 2.3 - Fixed error handling
 # ================================================================
 
 RED='\033[0;31m'
@@ -33,7 +33,7 @@ check_port() {
 # Получить процесс на порту
 get_port_process() {
     PORT=$1
-    netstat -lnp 2>/dev/null | grep ":${PORT} " | awk '{print $NF}' | cut -d/ -f2 | head -1
+    netstat -lnp 2>/dev/null | grep ":${PORT} " | awk '{print $NF}' | cut -d/ -f2 | head -1 || echo "unknown"
 }
 
 # ================================================================
@@ -56,7 +56,7 @@ for PORT in $PREFERRED_PORTS; do
     else
         PROCESS=$(get_port_process $PORT)
         if [ "$PORT" = "53" ]; then
-            echo -e "${YELLOW}  ⚠ Порт 53 занят: ${PROCESS:-unknown}${NC}"
+            echo -e "${YELLOW}  ⚠ Порт 53 занят: ${PROCESS}${NC}"
             
             # Детектим известные сервисы
             if echo "$PROCESS" | grep -q "ndnproxy"; then
@@ -67,13 +67,13 @@ for PORT in $PREFERRED_PORTS; do
                 echo -e "${YELLOW}     → AdGuard Home (конфликт!)${NC}"
             fi
         elif [ "$PORT" = "5353" ]; then
-            echo -e "${YELLOW}  ⚠ Порт 5353 занят: ${PROCESS:-unknown}${NC}"
+            echo -e "${YELLOW}  ⚠ Порт 5353 занят: ${PROCESS}${NC}"
             
             if echo "$PROCESS" | grep -q "avahi"; then
                 echo -e "${BLUE}     → avahi-daemon (mDNS/Bonjour)${NC}"
             fi
         else
-            echo -e "${YELLOW}  ⚠ Порт $PORT занят: ${PROCESS:-unknown}${NC}"
+            echo -e "${YELLOW}  ⚠ Порт $PORT занят: ${PROCESS}${NC}"
         fi
     fi
 done
@@ -110,12 +110,12 @@ echo ""
 # ================================================================
 echo -e "${YELLOW}► Установка зависимостей...${NC}"
 
-opkg update >/dev/null 2>&1
+opkg update >/dev/null 2>&1 || true
 
 if ! opkg list-installed | grep -q "^dnsmasq "; then
     echo "  Установка dnsmasq..."
-    opkg install dnsmasq >/dev/null 2>&1
-    if [ $? -eq 0 ]; then
+    opkg install dnsmasq >/dev/null 2>&1 || true
+    if opkg list-installed | grep -q "^dnsmasq "; then
         echo -e "${GREEN}  ✓ dnsmasq${NC}"
     else
         echo -e "${RED}  ✗ Ошибка установки dnsmasq${NC}"
@@ -126,8 +126,12 @@ else
 fi
 
 if ! opkg list-installed | grep -q "^bind-dig "; then
-    opkg install bind-dig >/dev/null 2>&1
-    echo -e "${GREEN}  ✓ bind-dig${NC}"
+    opkg install bind-dig >/dev/null 2>&1 || true
+    if opkg list-installed | grep -q "^bind-dig "; then
+        echo -e "${GREEN}  ✓ bind-dig${NC}"
+    else
+        echo -e "${GREEN}  ✓ bind-dig (установка пропущена)${NC}"
+    fi
 else
     echo -e "${GREEN}  ✓ bind-dig (уже установлен)${NC}"
 fi
@@ -139,17 +143,27 @@ echo ""
 # ================================================================
 echo -e "${YELLOW}► Остановка существующих процессов dnsmasq...${NC}"
 
+# Остановка через init скрипт
 if [ -f /opt/etc/init.d/S56dnsmasq ]; then
-    /opt/etc/init.d/S56dnsmasq stop >/dev/null 2>&1
+    /opt/etc/init.d/S56dnsmasq stop >/dev/null 2>&1 || true
 fi
 
-# Убиваем все dnsmasq процессы (но не ndnproxy и avahi!)
-DNSMASQ_PIDS=$(ps | grep dnsmasq | grep -v grep | awk '{print $1}')
+# Убиваем все dnsmasq процессы
+DNSMASQ_PIDS=$(ps | grep "[d]nsmasq" | awk '{print $1}' 2>/dev/null || true)
 if [ -n "$DNSMASQ_PIDS" ]; then
     for PID in $DNSMASQ_PIDS; do
-        kill $PID 2>/dev/null
+        kill $PID 2>/dev/null || true
     done
     sleep 1
+    
+    # Принудительное убийство если процесс остался
+    DNSMASQ_PIDS=$(ps | grep "[d]nsmasq" | awk '{print $1}' 2>/dev/null || true)
+    if [ -n "$DNSMASQ_PIDS" ]; then
+        for PID in $DNSMASQ_PIDS; do
+            kill -9 $PID 2>/dev/null || true
+        done
+        sleep 1
+    fi
 fi
 
 echo -e "${GREEN}✓ Процессы dnsmasq остановлены${NC}"
@@ -160,10 +174,10 @@ echo ""
 # ================================================================
 echo -e "${YELLOW}► Создание структуры директорий...${NC}"
 
-mkdir -p /opt/etc/dnsmasq.d
-mkdir -p /opt/etc/dnsmasq.d/backups
-mkdir -p /opt/var/log
-mkdir -p /opt/etc/hosts-automation
+mkdir -p /opt/etc/dnsmasq.d || true
+mkdir -p /opt/etc/dnsmasq.d/backups || true
+mkdir -p /opt/var/log || true
+mkdir -p /opt/etc/hosts-automation || true
 
 echo -e "${GREEN}✓ Директории созданы${NC}"
 echo ""
@@ -211,7 +225,7 @@ start_cmd() {
 }
 
 stop_cmd() {
-    ifconfig ${INTERFACE}:1 down 2>/dev/null
+    ifconfig ${INTERFACE}:1 down 2>/dev/null || true
     echo "Network alias removed"
 }
 
@@ -231,21 +245,22 @@ PREARGS=""
 . /opt/etc/init.d/rc.func
 EOFNET
 
-chmod +x /opt/etc/init.d/S55network-alias
+chmod +x /opt/etc/init.d/S55network-alias || true
 
 # Запуск алиаса
-/opt/etc/init.d/S55network-alias start >/dev/null 2>&1
+/opt/etc/init.d/S55network-alias start >/dev/null 2>&1 || true
 
 if ifconfig br0:1 2>/dev/null | grep -q "192.168.1.2"; then
     echo -e "${GREEN}✓ IP алиас 192.168.1.2 создан${NC}"
 else
-    echo -e "${YELLOW}⚠ IP алиас не создан, попытка альтернативного метода...${NC}"
-    ifconfig br0:1 192.168.1.2 netmask 255.255.255.0 up
+    echo -e "${YELLOW}⚠ IP алиас не создан через init, попытка прямого создания...${NC}"
+    ifconfig br0:1 192.168.1.2 netmask 255.255.255.0 up 2>/dev/null || true
     
     if ifconfig br0:1 2>/dev/null | grep -q "192.168.1.2"; then
-        echo -e "${GREEN}✓ IP алиас 192.168.1.2 создан (альтернативный метод)${NC}"
+        echo -e "${GREEN}✓ IP алиас 192.168.1.2 создан (прямой метод)${NC}"
     else
         echo -e "${RED}✗ Не удалось создать IP алиас${NC}"
+        echo -e "${YELLOW}  Попробуйте вручную: ifconfig br0:1 192.168.1.2 netmask 255.255.255.0 up${NC}"
     fi
 fi
 
@@ -326,24 +341,29 @@ pre_cmd() {
     # Проверка что IP алиас существует
     if ! ifconfig br0:1 2>/dev/null | grep -q "192.168.1.2"; then
         echo "Creating IP alias..."
-        /opt/etc/init.d/S55network-alias start >/dev/null 2>&1
+        /opt/etc/init.d/S55network-alias start >/dev/null 2>&1 || true
         sleep 1
+        
+        # Если всё ещё нет - создаём вручную
+        if ! ifconfig br0:1 2>/dev/null | grep -q "192.168.1.2"; then
+            ifconfig br0:1 192.168.1.2 netmask 255.255.255.0 up 2>/dev/null || true
+        fi
     fi
     
     # Проверка конфига
-    dnsmasq --test --conf-file=/opt/etc/dnsmasq.conf >/dev/null 2>&1
-    if [ $? -ne 0 ]; then
+    if ! dnsmasq --test --conf-file=/opt/etc/dnsmasq.conf >/dev/null 2>&1; then
         echo "Configuration test failed!"
+        dnsmasq --test --conf-file=/opt/etc/dnsmasq.conf
         return 1
     fi
 }
 
 start_cmd() {
     # Убедимся что старые процессы dnsmasq убиты
-    DNSMASQ_PIDS=$(ps | grep dnsmasq | grep -v grep | awk '{print $1}')
+    DNSMASQ_PIDS=$(ps | grep "[d]nsmasq" | awk '{print $1}' 2>/dev/null || true)
     if [ -n "$DNSMASQ_PIDS" ]; then
         for PID in $DNSMASQ_PIDS; do
-            kill $PID 2>/dev/null
+            kill $PID 2>/dev/null || true
         done
         sleep 1
     fi
@@ -353,24 +373,33 @@ start_cmd() {
     
     if [ $? -eq 0 ]; then
         sleep 2
-        if pgrep dnsmasq >/dev/null; then
+        if pgrep dnsmasq >/dev/null 2>&1; then
             return 0
         else
             echo "dnsmasq started but not running"
             return 1
         fi
     else
+        echo "Failed to start dnsmasq"
         return 1
     fi
 }
 
 stop_cmd() {
-    DNSMASQ_PIDS=$(ps | grep dnsmasq | grep -v grep | awk '{print $1}')
+    DNSMASQ_PIDS=$(ps | grep "[d]nsmasq" | awk '{print $1}' 2>/dev/null || true)
     if [ -n "$DNSMASQ_PIDS" ]; then
         for PID in $DNSMASQ_PIDS; do
-            kill $PID 2>/dev/null
+            kill $PID 2>/dev/null || true
         done
         sleep 1
+        
+        # Принудительное убийство
+        DNSMASQ_PIDS=$(ps | grep "[d]nsmasq" | awk '{print $1}' 2>/dev/null || true)
+        if [ -n "$DNSMASQ_PIDS" ]; then
+            for PID in $DNSMASQ_PIDS; do
+                kill -9 $PID 2>/dev/null || true
+            done
+        fi
     fi
     return 0
 }
@@ -381,7 +410,7 @@ PREARGS=""
 . /opt/etc/init.d/rc.func
 EOFINIT
 
-chmod +x /opt/etc/init.d/S56dnsmasq
+chmod +x /opt/etc/init.d/S56dnsmasq || true
 
 echo -e "${GREEN}✓ Init скрипт создан${NC}"
 echo ""
@@ -391,7 +420,7 @@ echo ""
 # ================================================================
 echo -e "${YELLOW}► Настройка cron...${NC}"
 
-mkdir -p /opt/etc/cron.d
+mkdir -p /opt/etc/cron.d || true
 
 # Проверка существования update-hosts-auto.sh
 if [ -f /opt/etc/update-hosts-auto.sh ]; then
@@ -427,7 +456,7 @@ echo -e "\${BLUE}╚════════════════════
 echo ""
 
 # Network info
-PRIMARY_IP=\$(ifconfig br0 | grep "inet addr" | awk '{print \$2}' | cut -d: -f2)
+PRIMARY_IP=\$(ifconfig br0 2>/dev/null | grep "inet addr" | awk '{print \$2}' | cut -d: -f2)
 SECONDARY_IP=\$(ifconfig br0:1 2>/dev/null | grep "inet addr" | awk '{print \$2}' | cut -d: -f2)
 
 echo -e "\${BLUE}🌐 Network:\${NC}"
@@ -440,7 +469,7 @@ DNSMASQ_PORT=\$(grep "^port=" /opt/etc/dnsmasq.conf 2>/dev/null | cut -d= -f2)
 [ -z "\$DNSMASQ_PORT" ] && DNSMASQ_PORT="53"
 
 # dnsmasq status
-if pgrep dnsmasq >/dev/null; then
+if pgrep dnsmasq >/dev/null 2>&1; then
     PID=\$(pgrep dnsmasq)
     echo -e "\${BLUE}📊 Status:\${NC}"
     echo -e "   \${GREEN}✅ dnsmasq: RUNNING (PID: \${PID})\${NC}"
@@ -453,11 +482,12 @@ echo ""
 
 # Listening ports
 echo -e "\${BLUE}🔌 Listening:\${NC}"
-netstat -ln | grep "192.168.1.2:\${DNSMASQ_PORT}" | while read line; do
-    echo "   \$line"
-done
-
-if ! netstat -ln | grep -q "192.168.1.2:\${DNSMASQ_PORT}"; then
+LISTENING=\$(netstat -ln 2>/dev/null | grep "192.168.1.2:\${DNSMASQ_PORT}")
+if [ -n "\$LISTENING" ]; then
+    echo "\$LISTENING" | while read line; do
+        echo "   \$line"
+    done
+else
     echo "   (none - порт \${DNSMASQ_PORT} не слушается)"
 fi
 echo ""
@@ -474,8 +504,10 @@ echo ""
 # Recent queries
 if [ -f /opt/var/log/dnsmasq.log ]; then
     echo -e "\${BLUE}📈 Recent queries (last 5):\${NC}"
-    tail -5 /opt/var/log/dnsmasq.log | grep "query" | awk '{print "   " \$6, "\t→", \$8}' 2>/dev/null
-    if [ \$? -ne 0 ]; then
+    QUERIES=\$(tail -5 /opt/var/log/dnsmasq.log 2>/dev/null | grep "query" | awk '{print "   " \$6, "\t→", \$8}')
+    if [ -n "\$QUERIES" ]; then
+        echo "\$QUERIES"
+    else
         echo "   (нет запросов)"
     fi
     echo ""
@@ -504,7 +536,7 @@ if [ "\${DNSMASQ_PORT}" != "53" ]; then
 fi
 EOFDASH
 
-chmod +x /opt/bin/dns-status
+chmod +x /opt/bin/dns-status || true
 
 echo -e "${GREEN}✓ dns-status создан${NC}"
 echo ""
@@ -516,15 +548,18 @@ echo -e "${YELLOW}► Запуск dnsmasq...${NC}"
 
 /opt/etc/init.d/S56dnsmasq start
 
-sleep 2
+sleep 3
 
-if pgrep dnsmasq >/dev/null; then
-    echo -e "${GREEN}✓ dnsmasq запущен (PID: $(pgrep dnsmasq))${NC}"
+if pgrep dnsmasq >/dev/null 2>&1; then
+    PID=$(pgrep dnsmasq)
+    echo -e "${GREEN}✓ dnsmasq запущен (PID: ${PID})${NC}"
 else
     echo -e "${YELLOW}⚠ dnsmasq не запущен${NC}"
     echo ""
-    echo "Попробуйте запустить вручную для диагностики:"
-    echo "  dnsmasq --conf-file=/opt/etc/dnsmasq.conf --no-daemon"
+    echo "Попробуйте диагностику:"
+    echo "  1. Проверьте конфиг: dnsmasq --test --conf-file=/opt/etc/dnsmasq.conf"
+    echo "  2. Запустите вручную: dnsmasq --conf-file=/opt/etc/dnsmasq.conf --no-daemon"
+    echo "  3. Проверьте логи: tail -20 /opt/var/log/dnsmasq.log"
 fi
 
 echo ""
@@ -538,7 +573,7 @@ if command -v ndmc >/dev/null 2>&1; then
     echo "  Настройка через ndmc..."
     
     # Попытка настроить DNS через ndmc
-    ndmc -c "interface Broadband0" -c "ip name-server 192.168.1.2" >/dev/null 2>&1
+    ndmc -c "interface Broadband0" -c "ip name-server 192.168.1.2" >/dev/null 2>&1 || true
     
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}  ✓ DNS настроен автоматически${NC}"
@@ -559,14 +594,14 @@ echo ""
 echo -e "${YELLOW}► Финальная проверка...${NC}"
 
 # Проверка порта
-if netstat -ln | grep -q "192.168.1.2:${DNSMASQ_PORT}"; then
+if netstat -ln 2>/dev/null | grep -q "192.168.1.2:${DNSMASQ_PORT}"; then
     echo -e "${GREEN}✓ Порт ${DNSMASQ_PORT} слушается${NC}"
 else
     echo -e "${YELLOW}⚠ Порт ${DNSMASQ_PORT} не слушается${NC}"
 fi
 
 # Тест DNS
-DNS_TEST=$(dig @192.168.1.2 -p ${DNSMASQ_PORT} google.com +short 2>/dev/null | head -1)
+DNS_TEST=$(dig @192.168.1.2 -p ${DNSMASQ_PORT} google.com +short 2>/dev/null | head -1 || true)
 
 if [ -n "$DNS_TEST" ]; then
     echo -e "${GREEN}✓ DNS тест: google.com → ${DNS_TEST}${NC}"
@@ -594,10 +629,8 @@ if [ "$DNSMASQ_PORT" != "53" ]; then
     echo ""
     echo -e "${YELLOW}⚠ ВАЖНО: dnsmasq использует порт ${DNSMASQ_PORT}${NC}"
     
-    if check_port 53; then
-        : # 53 не занят
-    else
-        PORT_53_PROC=$(get_port_process 53)
+    PORT_53_PROC=$(get_port_process 53)
+    if [ "$PORT_53_PROC" != "unknown" ]; then
         echo -e "${YELLOW}  Причина: порт 53 занят ($PORT_53_PROC)${NC}"
     fi
     
@@ -614,5 +647,7 @@ if [ "$DNSMASQ_PORT" != "53" ]; then
     fi
 fi
 
+echo ""
+echo -e "${GREEN}Команда для проверки: dns-status${NC}"
 echo ""
 exit 0
